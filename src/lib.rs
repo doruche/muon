@@ -1,14 +1,20 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! Muon is a tiny file system primarily designed for CafOS.
+//! For simplicity, no support for permissions, timestamps, or other advanced features.
+#![allow(unused)]
+#![no_std]
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+// Users of this crate must enable the `alloc` feature to use heap allocations.
+extern crate alloc;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+mod config;
+mod block_dev;
+mod structs;
+mod bitmap;
+mod superblock;
+mod fs;
+mod error;
+
+pub use block_dev::BlockDevice;
+pub use config::*;
+pub use structs::*;
+pub use error::FsError as Error;
