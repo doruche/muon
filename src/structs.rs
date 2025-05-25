@@ -8,17 +8,19 @@ pub struct SuperBlock {
     pub num_blocks: u32,    // Total number of blocks in the filesystem
     pub block_size: u32,    // Fixed to BLOCK_SIZE
     pub free_blocks: u32,   // Number of free blocks
+    pub num_inodes: u32,    // Total number of inodes in the filesystem
+    pub free_inodes: u32,   // Number of free inodes
     pub root_inode: u32,    // Inode number of the root directory
 
-    pub block_bitmap_start: u32, // Block number where the block bitmap starts
-    pub block_bitmap_size: u32, // Size of the block bitmap in blocks
+    pub data_bitmap_start: u32, // Block number where the data bitmap starts
+    pub data_bitmap_blocks: u32, // Size of the data bitmap in blocks
     pub inode_bitmap_start: u32, // Block number where the inode bitmap starts
-    pub inode_bitmap_size: u32, // Size of the inode bitmap in blocks
+    pub inode_bitmap_blocks: u32, // Size of the inode bitmap in blocks
     pub inode_table_start: u32, // Block number where the inode table starts
-    pub inode_table_size: u32, // Size of the inode table in blocks
+    pub inode_table_blocks: u32, // Size of the inode table in blocks
     pub data_start: u32, // Block number where data blocks start
 
-    pub reserved: [u8; 512 - 12 * 4], // Fill to 512 bytes.
+    pub reserved: [u8; BLOCK_SIZE - 14 * 4], // Fill to 512 bytes.
 }
 
 #[repr(u8)]
@@ -52,7 +54,7 @@ pub struct Inode {
     pub indirect_ptr: u32,
     pub direct_ptrs: [u32; NUM_DIRECT_PTRS],
     pub size: u64,
-    pub reserved: [u8; 512 - 4 * 4 - NUM_DIRECT_PTRS as usize * 4 - 8], // Fill to 512 bytes.
+    pub reserved: [u8; INODE_SIZE as usize - 4 * 4 - NUM_DIRECT_PTRS as usize * 4 - 8],
 }
 
 #[repr(C)]
