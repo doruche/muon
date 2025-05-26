@@ -29,11 +29,11 @@ where
         self.device.num_blocks()
     }
 
-    fn read_block(&self, block_id: usize, buf: &mut [u8; crate::BLOCK_SIZE]) -> Result<(), crate::Error> {
+    fn read_block(&self, block_id: u32, buf: &mut [u8; crate::BLOCK_SIZE]) -> Result<(), crate::Error> {
         todo!()
     }
 
-    fn write_block(&self, block_id: usize, buf: &[u8; crate::BLOCK_SIZE]) -> Result<(), crate::Error> {
+    fn write_block(&self, block_id: u32, buf: &[u8; crate::BLOCK_SIZE]) -> Result<(), crate::Error> {
         todo!()
     }
 

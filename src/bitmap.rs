@@ -22,7 +22,7 @@ fn set_first_fit_bit<D: BlockDevice>(
     let mut buf = Box::new([0u8; BLOCK_SIZE]);
 
     for i in 0..bitmap_blocks {
-        let current_block_id = (bitmap_start + i) as usize;
+        let current_block_id = bitmap_start + i;
         device.read_block(current_block_id, &mut buf)?;
 
         for j in 0..BLOCK_SIZE {
@@ -75,7 +75,7 @@ fn set_bit_at<D: BlockDevice>(
         return Err(FsError::OutOfBounds);
     }
 
-    let target_block_id = (bitmap_start + block_id) as usize;
+    let target_block_id = bitmap_start + block_id;
     let mut buf = Box::new([0u8; BLOCK_SIZE]);
 
     device.read_block(target_block_id, buf.as_mut())?;
@@ -163,6 +163,24 @@ pub fn free_inode<D: BlockDevice>(
         false
     )?;
     superblock.free_inodes += 1;
+    write_superblock(device, superblock)?;
+    Ok(())
+}
+
+pub fn set_inode_allocated(
+    device: &impl BlockDevice,
+    superblock: &mut SuperBlock,
+    inode_id: u32,
+) -> Result<()> {
+    set_bit_at(
+        device,
+        superblock.inode_bitmap_start,
+        superblock.inode_bitmap_blocks,
+        inode_id,
+        superblock.num_inodes,
+        true
+    )?;
+    superblock.free_inodes -= 1;
     write_superblock(device, superblock)?;
     Ok(())
 }

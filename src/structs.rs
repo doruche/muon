@@ -46,14 +46,14 @@ pub enum Mode {
     None = 0b000, // No permissions
 }
 
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct Inode {
-    pub mode: Mode,
     pub ftype: FileType,
     pub id: u32,
     pub blocks: u32,
-    pub links_cnt: u32,
+    pub links_cnt: u32, // When links_cnt decreases to 0 and all file descriptors are closed, the inode can be freed.
     pub indirect_ptr: u32,
     pub direct_ptrs: [u32; NUM_DIRECT_PTRS],
     pub size: u64,

@@ -33,7 +33,7 @@ pub fn dir_lookup(
             false,
         )?;
         let mut direntries_buf = Box::new([0u8; BLOCK_SIZE]);
-        device.read_block(block_id as usize, direntries_buf.as_mut())?;
+        device.read_block(block_id, direntries_buf.as_mut())?;
         for j in 0..NUM_ENTRY_PER_BLOCK {
             if i * NUM_ENTRY_PER_BLOCK + j >= num_dirents {
                 break; // No more entries to check
@@ -93,7 +93,7 @@ pub fn dir_add_entry(
             i as u64 * BLOCK_SIZE as u64,
             false,
         )?;
-        device.read_block(block_id as usize, cur_block_buf.as_mut())?;
+        device.read_block(block_id, cur_block_buf.as_mut())?;
 
         for j in 0..NUM_ENTRY_PER_BLOCK {
             let cur_dirent_offset = j * DIR_ENTRY_SIZE;
@@ -126,7 +126,7 @@ pub fn dir_add_entry(
         block_inner_offset = (prev_size % BLOCK_SIZE as u64) as usize;
         parent_inode.size = new_size;
         parent_inode.blocks = ((new_size + BLOCK_SIZE as u64 - 1) / BLOCK_SIZE as u64) as u32;
-        device.read_block(block_id_to_write as usize, cur_block_buf.as_mut())?;
+        device.read_block(block_id_to_write, cur_block_buf.as_mut())?;
     }
 
     let dest_ptr = unsafe {
@@ -139,7 +139,7 @@ pub fn dir_add_entry(
             1
         );
     }
-    device.write_block(block_id_to_write as usize, cur_block_buf.as_ref())?;
+    device.write_block(block_id_to_write, cur_block_buf.as_ref())?;
 
     write_inode(device, superblock, &parent_inode)?;
 
@@ -182,7 +182,7 @@ pub fn dir_rm_entry(
             (i * BLOCK_SIZE) as u64, 
             false
         )?;
-        device.read_block(block_id as usize, cur_block_buf.as_mut())?;
+        device.read_block(block_id, cur_block_buf.as_mut())?;
         for j in 0..NUM_ENTRY_PER_BLOCK {
             if i * NUM_ENTRY_PER_BLOCK + j >= num_dirents {
                 break 'found_entry;
@@ -230,7 +230,7 @@ pub fn dir_rm_entry(
     parent_inode.blocks = ((parent_inode.size + BLOCK_SIZE as u64 - 1) / BLOCK_SIZE as u64) as u32;
 
     write_inode(device, superblock, &parent_inode)?;
-    device.write_block(block_id_to_modify as usize, cur_block_buf.as_ref())?;
+    device.write_block(block_id_to_modify, cur_block_buf.as_ref())?;
 
     Ok(inode_id_to_remove)
 }

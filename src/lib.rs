@@ -18,7 +18,7 @@
 //! 7. MuonFS: The main file system interface for users.
 
 #![allow(unused)]
-#![no_std]
+//#![no_std]
 
 // Users of this crate must enable the `alloc` feature for heap allocations.
 extern crate alloc;
@@ -41,5 +41,9 @@ pub use config::*;
 pub use superblock::*;
 pub use structs::*;
 pub use inode::*;
+pub use path::*;
+pub use directory::*;
+pub use file::*;
+pub use fs::*;
 pub use error::FsError as Error;
 pub use error::Result;

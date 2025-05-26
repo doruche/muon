@@ -25,7 +25,7 @@ pub fn fread(
 
     while remain_buf_len > 0 && current_offset < inode.size as u64 {
         let block_id = bmap(device, superblock, inode, current_offset, false)?;
-        device.read_block(block_id as usize, block_buf.as_mut())?;
+        device.read_block(block_id, block_buf.as_mut())?;
 
         let bytes_in_cur_block = BLOCK_SIZE.min(inode.size as usize - current_offset as usize);
         let bytes_to_copy = bytes_in_cur_block.min(remain_buf_len);
@@ -62,13 +62,13 @@ pub fn fwrite(
 
     while remain_buf_len > 0 {
         let block_id = bmap(device, superblock, inode, current_offset, true)?;
-        device.read_block(block_id as usize, block_buf.as_mut())?;
+        device.read_block(block_id, block_buf.as_mut())?;
 
         let bytes_in_cur_block = BLOCK_SIZE.min(inode.size as usize - current_offset as usize);
         let bytes_to_copy = bytes_in_cur_block.min(remain_buf_len);
         
         block_buf[..bytes_to_copy].copy_from_slice(&buffer[bytes_written..bytes_written + bytes_to_copy]);
-        device.write_block(block_id as usize, block_buf.as_ref())?;
+        device.write_block(block_id, block_buf.as_ref())?;
 
         bytes_written += bytes_to_copy;
         remain_buf_len -= bytes_to_copy;

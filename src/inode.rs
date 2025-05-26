@@ -21,7 +21,7 @@ pub fn get_inode(
     let block_id = superblock.inode_table_start + (inode_id / (BLOCK_SIZE / INODE_SIZE) as u32);
     let block_inner_offset = (inode_id % (BLOCK_SIZE / INODE_SIZE) as u32) * INODE_SIZE as u32;
     let mut buf = Box::new([0u8; BLOCK_SIZE]);
-    device.read_block(block_id as usize, buf.as_mut())?;
+    device.read_block(block_id, buf.as_mut())?;
     
     let inode: Inode = unsafe {
         core::ptr::read_unaligned(buf.as_ptr().add(block_inner_offset as usize) as *const Inode)
@@ -41,14 +41,14 @@ pub fn write_inode(
     let block_id = superblock.inode_table_start + (inode.id / (BLOCK_SIZE / INODE_SIZE) as u32);
     let block_inner_offset = (inode.id % (BLOCK_SIZE / INODE_SIZE) as u32) * INODE_SIZE as u32;
     let mut buf = Box::new([0u8; BLOCK_SIZE]);
-    device.read_block(block_id as usize, buf.as_mut())?;
+    device.read_block(block_id, buf.as_mut())?;
     unsafe {
         core::ptr::write_unaligned(
             buf.as_mut_ptr().add(block_inner_offset as usize) as *mut Inode,
             *inode
         );
     }
-    device.write_block(block_id as usize, buf.as_ref())?;
+    device.write_block(block_id, buf.as_ref())?;
     Ok(())
 }
 
@@ -99,11 +99,11 @@ pub fn bmap(
             indirect_block_id = inode.indirect_ptr;
             inode.blocks += 1;
             // Zero out the new indirect block
-            device.write_block(indirect_block_id as usize, &[0; BLOCK_SIZE])?;
+            device.write_block(indirect_block_id , &[0; BLOCK_SIZE])?;
         }
 
         let mut indirect_ptr_buf = Box::new([0u8; BLOCK_SIZE]);
-        device.read_block(indirect_block_id as usize, indirect_ptr_buf.as_mut())?;
+        device.read_block(indirect_block_id, indirect_ptr_buf.as_mut())?;
 
         let ptrs = unsafe {
             core::slice::from_raw_parts_mut(
@@ -121,7 +121,7 @@ pub fn bmap(
             inode.blocks += 1;
             write_inode(device, superblock, &inode)?;
             // Write back the updated indirect block
-            device.write_block(indirect_block_id as usize, indirect_ptr_buf.as_ref())?;
+            device.write_block(indirect_block_id, indirect_ptr_buf.as_ref())?;
         }
 
         return Ok(data_block_id);
@@ -146,7 +146,7 @@ pub fn free_inode(
     //Indirect block
     if inode.indirect_ptr != 0 {
         let mut ptr_buf = Box::new([0u8; BLOCK_SIZE]);
-        device.read_block(inode.indirect_ptr as usize, ptr_buf.as_mut())?;
+        device.read_block(inode.indirect_ptr, ptr_buf.as_mut())?;
         let ptrs = unsafe {
             core::slice::from_raw_parts_mut(
                 ptr_buf.as_mut_ptr() as *mut u32,
@@ -163,7 +163,6 @@ pub fn free_inode(
     }
     inode.blocks = 0;
     inode.size = 0;
-    inode.mode = Mode::None;
 
     crate::bitmap::free_inode(device, superblock, inode.id)?;
 

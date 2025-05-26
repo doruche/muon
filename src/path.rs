@@ -1,6 +1,6 @@
 //! Path resolution and manipulation utilities.
 
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 
 use crate::{directory::dir_lookup, get_inode, BlockDevice, Error, FileType, Result, SuperBlock, ROOT_INODE_ID};
 
@@ -48,5 +48,45 @@ pub fn resolve(
         }
     }
 
-    Err(Error::InvalidPath)
+    Err(Error::NotFound)
+}
+
+/// Splits a path into its directory and file name components.
+/// Always absolute paths are expected.
+/// eg. "/home/user/file.txt" -> ("/home/user", "file.txt")
+///     "/file.txt" -> ("/", "file.txt")
+///     "file.txt" -> ("", "file.txt")
+pub fn split(path: &str) -> (String, String) {
+    if let Some(pos) = path.rfind('/') {
+        if pos == 0 {
+            ("/".to_string(), path[1..].to_string())
+        } else {
+            (path[..pos].to_string(), path[pos + 1..].to_string())
+        }
+    } else {
+        ("".to_string(), path.to_string())
+    }
+}
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_split() {
+        let (dir, file) = split("/home/user/file.txt");
+        assert_eq!(dir, "/home/user");
+        assert_eq!(file, "file.txt");
+
+        let (dir, file) = split("file.txt");
+        assert_eq!(dir, "");
+        assert_eq!(file, "file.txt");
+
+        let (dir, file) = split("/file.txt");
+        assert_eq!(dir, "/");
+        assert_eq!(file, "file.txt");
+
+        let (dir, file) = split("/");
+        assert_eq!(dir, "/");
+        assert_eq!(file, "");
+    }
 }
