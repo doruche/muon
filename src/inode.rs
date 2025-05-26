@@ -1,12 +1,14 @@
 //! Management of reading and writing to inodes.
 
+use alloc::boxed::Box;
 use alloc::vec;
 
-use crate::{Inode, Result, SuperBlock, BLOCK_SIZE, INODE_SIZE, NUM_DIRECT_PTRS, PTRS_PER_BLOCK};
+use crate::{Inode, Mode, Result, SuperBlock, BLOCK_SIZE, INODE_SIZE, NUM_DIRECT_PTRS, PTRS_PER_BLOCK};
 use crate::BlockDevice;
 use crate::error::FsError;
-use crate::bitmap::*;
+use crate::bitmap::{alloc_data_block, free_data_block};
 
+/// Query an inode by its ID.
 pub fn get_inode(
     device: &impl BlockDevice,
     superblock: &SuperBlock,
@@ -18,8 +20,8 @@ pub fn get_inode(
     
     let block_id = superblock.inode_table_start + (inode_id / (BLOCK_SIZE / INODE_SIZE) as u32);
     let block_inner_offset = (inode_id % (BLOCK_SIZE / INODE_SIZE) as u32) * INODE_SIZE as u32;
-    let mut buf = vec![0; BLOCK_SIZE];
-    device.read_block(block_id as usize, buf.as_mut_slice())?;
+    let mut buf = Box::new([0u8; BLOCK_SIZE]);
+    device.read_block(block_id as usize, buf.as_mut())?;
     
     let inode: Inode = unsafe {
         core::ptr::read_unaligned(buf.as_ptr().add(block_inner_offset as usize) as *const Inode)
@@ -28,20 +30,18 @@ pub fn get_inode(
     Ok(inode)
 }
 
+/// Write an inode to the filesystem.
+/// The inode must be allocated by 'alloc_inode'.
+/// This means user can only modify existing inodes, not create new ones with this function.
 pub fn write_inode(
     device: &impl BlockDevice,
     superblock: &SuperBlock,
-    inode_id: u32,
     inode: &Inode
 ) -> Result<()> {
-    if inode_id >= superblock.num_inodes {
-        return Err(FsError::OutOfBounds);
-    }
-
-    let block_id = superblock.inode_table_start + (inode_id / (BLOCK_SIZE / INODE_SIZE) as u32);
-    let block_inner_offset = (inode_id % (BLOCK_SIZE / INODE_SIZE) as u32) * INODE_SIZE as u32;
-    let mut buf = vec![0; BLOCK_SIZE];
-    device.read_block(block_id as usize, buf.as_mut_slice())?;
+    let block_id = superblock.inode_table_start + (inode.id / (BLOCK_SIZE / INODE_SIZE) as u32);
+    let block_inner_offset = (inode.id % (BLOCK_SIZE / INODE_SIZE) as u32) * INODE_SIZE as u32;
+    let mut buf = Box::new([0u8; BLOCK_SIZE]);
+    device.read_block(block_id as usize, buf.as_mut())?;
     unsafe {
         core::ptr::write_unaligned(
             buf.as_mut_ptr().add(block_inner_offset as usize) as *mut Inode,
@@ -53,6 +53,7 @@ pub fn write_inode(
 }
 
 /// Maps a file offset to a block ID in the filesystem.
+/// The offset must be a multiple of BLOCK_SIZE.
 pub fn bmap(
     device: &impl BlockDevice,
     superblock: &mut SuperBlock,
@@ -60,14 +61,16 @@ pub fn bmap(
     file_offset: u64,
     create: bool,
 ) -> Result<u32> {
-    let block_offset = file_offset / BLOCK_SIZE as u64;
+    if file_offset % BLOCK_SIZE as u64 != 0 {
+        return Err(FsError::InvalidArgument);
+    }
 
+    let block_offset = file_offset / BLOCK_SIZE as u64;
 
     if create && file_offset >= inode.size {
         inode.size = file_offset + 1;
+        inode.blocks = ((inode.size + BLOCK_SIZE as u64 - 1) / BLOCK_SIZE as u64) as u32;
     }
-
-    inode.blocks = ((inode.size + BLOCK_SIZE as u64 - 1) / BLOCK_SIZE as u64) as u32;
 
     // Direct blocks
     if block_offset < NUM_DIRECT_PTRS as u64 {
@@ -80,6 +83,7 @@ pub fn bmap(
             inode.direct_ptrs[block_offset as usize] = block_id;
             inode.blocks += 1;
         }
+        write_inode(device, superblock, &inode)?;
         return Ok(block_id);
     }
 
@@ -95,11 +99,11 @@ pub fn bmap(
             indirect_block_id = inode.indirect_ptr;
             inode.blocks += 1;
             // Zero out the new indirect block
-            device.write_block(indirect_block_id as usize, vec![0; BLOCK_SIZE].as_ref())?;
+            device.write_block(indirect_block_id as usize, &[0; BLOCK_SIZE])?;
         }
 
-        let mut indirect_ptr_buf = vec![0; BLOCK_SIZE];
-        device.read_block(indirect_block_id as usize, indirect_ptr_buf.as_mut_slice())?;
+        let mut indirect_ptr_buf = Box::new([0u8; BLOCK_SIZE]);
+        device.read_block(indirect_block_id as usize, indirect_ptr_buf.as_mut())?;
 
         let ptrs = unsafe {
             core::slice::from_raw_parts_mut(
@@ -115,6 +119,7 @@ pub fn bmap(
             data_block_id = alloc_data_block(device, superblock)?;
             ptrs[indirect_offset as usize] = data_block_id;
             inode.blocks += 1;
+            write_inode(device, superblock, &inode)?;
             // Write back the updated indirect block
             device.write_block(indirect_block_id as usize, indirect_ptr_buf.as_ref())?;
         }
@@ -123,4 +128,44 @@ pub fn bmap(
     } else {
         return Err(FsError::FileTooLarge);
     }
+}
+
+pub fn free_inode(
+    device: &impl BlockDevice,
+    superblock: &mut SuperBlock,
+    inode: &mut Inode
+) -> Result<()> {
+    //Direct blocks
+    for &block_id in inode.direct_ptrs.iter() {
+        if block_id != 0 {
+            free_data_block(device, superblock, block_id)?;
+        }
+    }
+    inode.direct_ptrs.fill(0);
+    
+    //Indirect block
+    if inode.indirect_ptr != 0 {
+        let mut ptr_buf = Box::new([0u8; BLOCK_SIZE]);
+        device.read_block(inode.indirect_ptr as usize, ptr_buf.as_mut())?;
+        let ptrs = unsafe {
+            core::slice::from_raw_parts_mut(
+                ptr_buf.as_mut_ptr() as *mut u32,
+                PTRS_PER_BLOCK
+            )
+        };
+        for &block_id in ptrs.iter() {
+            if block_id != 0 {
+                free_data_block(device, superblock, block_id)?;
+            }
+        }
+        free_data_block(device, superblock, inode.indirect_ptr)?;
+        inode.indirect_ptr = 0;
+    }
+    inode.blocks = 0;
+    inode.size = 0;
+    inode.mode = Mode::None;
+
+    crate::bitmap::free_inode(device, superblock, inode.id)?;
+
+    Ok(())
 }

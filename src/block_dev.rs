@@ -1,4 +1,4 @@
-use crate::error::FsError;
+use crate::{error::FsError, BLOCK_SIZE};
 
 
 pub trait BlockDevice: Send + Sync {
@@ -7,11 +7,11 @@ pub trait BlockDevice: Send + Sync {
 
     /// Reads a block of data from the block device.
     /// buf.len() must be equal to block_size().
-    fn read_block(&self, block_id: usize, buf: &mut [u8]) -> Result<(), FsError>;
+    fn read_block(&self, block_id: usize, buf: &mut [u8; BLOCK_SIZE]) -> Result<(), FsError>;
     
     /// Writes a block of data to the block device.
     /// buf.len() must be equal to block_size().
-    fn write_block(&self, block_id: usize, buf: &[u8]) -> Result<(), FsError>;
+    fn write_block(&self, block_id: usize, buf: &[u8; BLOCK_SIZE]) -> Result<(), FsError>;
     
     /// Flushes any cached data to the block device.
     /// This is typically used to ensure that all writes are persisted.

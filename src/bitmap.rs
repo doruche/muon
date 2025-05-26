@@ -2,6 +2,7 @@
 //! Data bitmap then uses these pointers to track which blocks are used for according data.
 //! Inode bitmap for tracking files' inodes, which tell direct and indirect pointers to data blocks.
 
+use alloc::boxed::Box;
 use alloc::vec;
 
 use crate::superblock::write_superblock;
@@ -18,11 +19,11 @@ fn set_first_fit_bit<D: BlockDevice>(
     total_items: u32,
     value: bool, // true for setting first false to true, false for setting first true to false
 ) -> Result<u32> {
-    let mut buf = vec![0; BLOCK_SIZE];
+    let mut buf = Box::new([0u8; BLOCK_SIZE]);
 
     for i in 0..bitmap_blocks {
         let current_block_id = (bitmap_start + i) as usize;
-        device.read_block(current_block_id, buf.as_mut_slice())?;
+        device.read_block(current_block_id, &mut buf)?;
 
         for j in 0..BLOCK_SIZE {
             let byte = buf[j];
@@ -75,9 +76,9 @@ fn set_bit_at<D: BlockDevice>(
     }
 
     let target_block_id = (bitmap_start + block_id) as usize;
-    let mut buf = vec![0; BLOCK_SIZE];
+    let mut buf = Box::new([0u8; BLOCK_SIZE]);
 
-    device.read_block(target_block_id, buf.as_mut_slice())?;
+    device.read_block(target_block_id, buf.as_mut())?;
     let pre_value = (buf[byte_offset as usize] & (1 << bit_offset)) != 0;
     if set_value {
         buf[byte_offset as usize] |= 1 << bit_offset;
@@ -106,7 +107,7 @@ pub fn alloc_data_block<D: BlockDevice>(
         true)?;
     superblock.free_blocks -= 1;
     // TODO: Should be done by the upper layer, not here.
-    // write_superblock(device, superblock)?;
+    write_superblock(device, superblock)?;
     Ok(block_id + superblock.data_start)
 }
 
@@ -129,7 +130,7 @@ pub fn free_data_block<D: BlockDevice>(
         false
     )?;
     superblock.free_blocks += 1;
-    // write_superblock(device, superblock)?;
+    write_superblock(device, superblock)?;
     Ok(())
 }
 
@@ -144,7 +145,7 @@ pub fn alloc_inode<D: BlockDevice>(
         superblock.num_inodes,
         true)?;
     superblock.free_inodes -= 1;
-    // write_superblock(device, superblock)?;
+    write_superblock(device, superblock)?;
     Ok(inode_id)
 }
 
@@ -162,6 +163,6 @@ pub fn free_inode<D: BlockDevice>(
         false
     )?;
     superblock.free_inodes += 1;
-    // write_superblock(device, superblock)?;
+    write_superblock(device, superblock)?;
     Ok(())
 }

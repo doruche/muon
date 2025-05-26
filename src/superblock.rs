@@ -6,7 +6,7 @@ use crate::{config::*, Result};
 
 pub fn read_superblock<D: BlockDevice>(device: &D) -> Result<SuperBlock> {
     let mut buf = Box::new([0u8; BLOCK_SIZE]);
-    device.read_block(SUPERBLOCK_ID, buf.as_mut_slice());
+    device.read_block(SUPERBLOCK_ID, &mut buf);
     let superblock: SuperBlock = unsafe {
         core::ptr::read_unaligned(buf.as_ptr() as *const SuperBlock)
     };
@@ -53,13 +53,12 @@ impl SuperBlock {
         let inode_table_blocks = (num_inodes + inodes_per_block - 1) / inodes_per_block;
 
         let data_start = inode_table_start + inode_table_blocks;
-        let free_blocks = num_blocks - data_start;
-
         // Simple sanity check for the number of blocks.
-        if free_blocks <= 0 {
+        if num_blocks <= data_start {
             return Err(FsError::InvalidSuperBlock);
         }
-
+        let free_blocks = num_blocks - data_start;
+        
         Ok(SuperBlock { 
             magic: MAGIC, 
             num_blocks, 

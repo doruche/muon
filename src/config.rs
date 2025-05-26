@@ -9,6 +9,8 @@ pub const INODE_SIZE: usize = 128;
 
 pub const MAX_DIR_ENTRIES: usize = 128; // Maximum number of directory entries per directory
 pub const MAX_FILE_NAME_LEN: usize = 64 - 4; // DirEntry name length minus inode ID (4 bytes)
+pub const DIR_ENTRY_SIZE: usize = 64; // Size of a directory entry (inode ID + name)
+pub const NUM_ENTRY_PER_BLOCK: usize = BLOCK_SIZE / DIR_ENTRY_SIZE; // Number of directory entries per block
 pub const DOT_NAME: &[u8; 1] = b".";
 pub const DOTDOT_NAME: &[u8; 2] = b"..";
 

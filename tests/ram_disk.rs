@@ -1,8 +1,17 @@
+#![allow(unused)]
+
 use std::sync::{Arc, Mutex};
 
+use muon::get_inode;
+use muon::write_inode;
 use muon::BlockDevice;
 use muon::Error;
+use muon::FileType;
+use muon::Inode;
+use muon::Mode;
+use muon::SuperBlock;
 use muon::BLOCK_SIZE;
+use muon::NUM_DIRECT_PTRS;
 
 pub struct RamDisk {
     inner: Arc<Mutex<Vec<u8>>>,
@@ -28,12 +37,9 @@ impl BlockDevice for RamDisk {
         self.num_blocks
     }
 
-    fn read_block(&self, block_id: usize, buf: &mut [u8]) -> Result<(), muon::Error> {
+    fn read_block(&self, block_id: usize, buf: &mut [u8; BLOCK_SIZE]) -> Result<(), muon::Error> {
         if block_id >= self.num_blocks {
             return Err(Error::InvalidBlockId);
-        }
-        if buf.len() != BLOCK_SIZE {
-            return Err(Error::ReadError);
         }
         let start = block_id * BLOCK_SIZE;
         let end = start + BLOCK_SIZE;
@@ -42,12 +48,9 @@ impl BlockDevice for RamDisk {
         Ok(())
     }
 
-    fn write_block(&self, block_id: usize, buf: &[u8]) -> Result<(), Error> {
+    fn write_block(&self, block_id: usize, buf: &[u8; BLOCK_SIZE]) -> Result<(), Error> {
         if block_id >= self.num_blocks {
             return Err(Error::InvalidBlockId);
-        }
-        if buf.len() != BLOCK_SIZE {
-            return Err(Error::WriteError);
         }
         let start = block_id * BLOCK_SIZE;
         let end = start + BLOCK_SIZE;
@@ -62,10 +65,35 @@ impl BlockDevice for RamDisk {
     }
 }
 
+#[test]
 fn test_superblock() {
-
+    let rd = RamDisk::new(64);
+    let superblock = SuperBlock::new(64, 80).unwrap();
+    println!("Created superblock: {:?}", superblock);
+    muon::write_superblock(&rd, &superblock).unwrap();
+    let read_superblock = muon::read_superblock(&rd).unwrap();
+    assert_eq!(superblock.magic, read_superblock.magic);
+    println!("Read superblock: {:?}", read_superblock);
 }
 
-fn main() {
-    test_superblock();    
+#[test]
+fn test_inode() {
+    let rd = RamDisk::new(64);
+    let superblock = SuperBlock::new(64, 80).unwrap();
+    muon::write_superblock(&rd, &superblock).unwrap();
+    let inode = Inode {
+        mode: Mode::RW,
+        ftype: FileType::Regular,
+        blocks: 3,
+        id: 3,
+        links_cnt: 1,
+        indirect_ptr: 0,
+        direct_ptrs: [0; NUM_DIRECT_PTRS],
+        size: 1024,
+        reserved: [0; 44],
+    };
+    write_inode(&rd, &superblock, &inode).unwrap();
+    let mut read_inode = get_inode(&rd, &superblock, 3).unwrap();
+    println!("Inode struct size: {}", std::mem::size_of::<Inode>());
+    println!("Read inode: {:?}", read_inode);
 }
