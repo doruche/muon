@@ -19,6 +19,7 @@ mod block_dev;
 mod structs;
 mod bitmap;
 mod superblock;
+mod inode;
 mod fs;
 mod error;
 

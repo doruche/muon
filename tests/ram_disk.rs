@@ -61,3 +61,11 @@ impl BlockDevice for RamDisk {
         Ok(())
     }
 }
+
+fn test_superblock() {
+
+}
+
+fn main() {
+    test_superblock();    
+}

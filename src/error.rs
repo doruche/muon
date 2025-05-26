@@ -7,6 +7,7 @@ pub enum FsError {
     OutOfBounds,
     InvalidSuperBlock,
     InvalidBlockId,
+    FileTooLarge,
     ReadError,
     WriteError,
     NotFound,
