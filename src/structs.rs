@@ -77,6 +77,7 @@ impl Inode {
 #[derive(Debug, Clone, Copy)]
 pub struct DirEntry {
     pub inode_id: u32,
+    /// Name of the file or directory, padded with zero to fit MAX_FILE_NAME_LEN, if the name is shorter.
     pub name: [u8; MAX_FILE_NAME_LEN],
 }
 

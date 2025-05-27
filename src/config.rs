@@ -2,7 +2,7 @@ pub const MAGIC: u32 = 0x4D554F4E; // "MUON" in ASCII
 
 pub const BLOCK_SIZE: usize = 512;
 pub const SUPERBLOCK_ID: u32 = 0; // Block ID for the superblock
-pub const ROOT_INODE_ID: u32 = 0; // Inode ID for the root directory
+pub const ROOT_INODE_ID: u32 = 1; // Inode ID for the root directory
 pub const MAX_FSIZE: usize = 1024 * 1024 * 1024; // 1 GiB
 pub const MAX_INODES: usize = 1024; // Maximum number of inodes
 pub const INODE_SIZE: usize = 128;  // Distance between inodes in the inode table

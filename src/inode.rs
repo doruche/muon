@@ -52,6 +52,8 @@ pub fn write_inode(
     Ok(())
 }
 
+/// Allocates a new inode with the given file type and mode.
+/// The hard link count is initialized to 0, and the inode is not linked to any directory.
 pub fn alloc_inode(
     device: &impl BlockDevice,
     superblock: &mut SuperBlock,
@@ -138,7 +140,6 @@ pub fn bmap(
 
     if create && file_offset >= inode.size {
         inode.size = file_offset + 1;
-        inode.blocks = ((inode.size + BLOCK_SIZE as u64 - 1) / BLOCK_SIZE as u64) as u32;
     }
 
     // Direct blocks

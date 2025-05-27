@@ -1,5 +1,6 @@
 #![allow(unused)]
 
+use std::fs::File;
 use std::sync::{Arc, Mutex};
 
 use muon::get_inode;
@@ -86,8 +87,8 @@ fn test_inode() {
         blocks: 3,
         id: 3,
         links_cnt: 1,
-        indirect_ptr: 0,
-        direct_ptrs: [0; NUM_DIRECT_PTRS],
+        indirect_ptr: None,
+        direct_ptrs: [None; NUM_DIRECT_PTRS],
         size: 1024,
     };
     write_inode(&rd, &superblock, &inode).unwrap();
@@ -98,20 +99,111 @@ fn test_inode() {
 fn test_init_fs() {
     let rd = RamDisk::new(64);
     let fs = FileSystem::format(Arc::new(rd), 64, 80).unwrap();
+    println!("{}", fs.dump());
+}
+
+#[test]
+fn test_root_dir() {
+    let rd = RamDisk::new(64);
+    let mut fs = FileSystem::format(Arc::new(rd), 64, 80).unwrap();
+    let root_inode_id = fs.root_inode_id();
+    let root_inode = fs.get_inode(root_inode_id).unwrap();
+    assert_eq!(root_inode.ftype, FileType::Directory);
+    assert_eq!(root_inode.id, 1);
+    assert_eq!(root_inode.blocks, 1);
+    assert_eq!(root_inode.links_cnt, 2); // Root directory has at least two links: '.' and '..'
+    let entries = fs.read_dir("/").unwrap();
+    println!("Root directory entries count: {}", entries.len());
+    for entry in entries {
+        println!("Inode {} Name {}", entry.inode_id, String::from_utf8_lossy(&entry.name));
+    }
 }
 
 #[test]
 fn test_create_file() {
     let rd = RamDisk::new(64);
     let mut fs = FileSystem::format(Arc::new(rd), 64, 80).unwrap();
-    let parent_inode_id = fs.root_inode_id();
-    let file_name = "/test_file.txt";
-    
-    // Create a new file
-    let new_inode_id = fs.open(file_name, Mode::RWE, true).unwrap();
-    println!("Created file with inode ID: {}", new_inode_id);
+    let file_inode_id = fs.creat("/test.txt", FileType::Regular, Mode::RW).unwrap();
+    let file_inode = fs.get_inode(file_inode_id).unwrap();
+    assert_eq!(file_inode.ftype, FileType::Regular);
+    assert_eq!(file_inode.id, file_inode_id);
+    assert_eq!(file_inode.blocks, 0);
+    assert_eq!(file_inode.links_cnt, 1); // New file has one link
+    let entries = fs.read_dir("/").unwrap();
+    for entry in entries {
+        println!("Inode {} Name {}", entry.inode_id, String::from_utf8_lossy(&entry.name));
+    }
+    let file2_inode_id = fs.creat("/test2.txt", FileType::Regular, Mode::RW).unwrap();
+    let file2_inode = fs.get_inode(file2_inode_id).unwrap();
+    assert_eq!(file2_inode.ftype, FileType::Regular);
+    assert_eq!(file2_inode.id, file2_inode_id);
+    assert_eq!(file2_inode.blocks, 0);
+    assert_eq!(file2_inode.links_cnt, 1); // New file has one link
+    let entries = fs.read_dir("/").unwrap();
+    for entry in entries {
+        println!("Inode {} Name {}", entry.inode_id, String::from_utf8_lossy(&entry.name));
+    }
+}
 
-    // Verify the file was created
-    let inode = get_inode(fs.device().as_ref(), fs.superblock(), new_inode_id).unwrap();
+#[test]
+fn test_lookup() {
+    let rd = RamDisk::new(64);
+    let mut fs = FileSystem::format(Arc::new(rd), 64, 80).unwrap();
+    fs.creat("/test.txt", FileType::Regular, Mode::RW).unwrap();
+    let entries = fs.read_dir("/").unwrap();
+    for entry in entries {
+        println!("Inode {} Name {}", entry.inode_id, String::from_utf8_lossy(&entry.name));
+    }
+    let (inode_id, ftype) = fs.lookup("/test.txt").unwrap();
+    let inode = fs.get_inode(inode_id).unwrap();
     assert_eq!(inode.ftype, FileType::Regular);
+}
+
+#[test]
+fn test_remove_file() {
+    let rd = RamDisk::new(64);
+    let mut fs = FileSystem::format(Arc::new(rd), 64, 80).unwrap();
+    fs.creat("/test.txt", FileType::Regular, Mode::RW).unwrap();
+    let entries = fs.read_dir("/").unwrap();
+    fs.remove("/test.txt", FileType::Regular).unwrap();
+    let entries = fs.read_dir("/").unwrap();
+    for entry in entries {
+        println!("Inode {} Name {}", entry.inode_id, String::from_utf8_lossy(&entry.name));
+    }
+    fs.creat("/test2.txt", FileType::Regular, Mode::RW).unwrap();
+    let entries = fs.read_dir("/").unwrap();
+    for entry in entries {
+        println!("Inode {} Name {}", entry.inode_id, String::from_utf8_lossy(&entry.name));
+    }
+    let (inode_id, ftype) = fs.lookup("/test2.txt").unwrap();
+    let inode = fs.get_inode(inode_id).unwrap();
+    assert_eq!(inode.ftype, FileType::Regular);
+    fs.remove("/test2.txt", FileType::Regular).unwrap();
+    let entries = fs.read_dir("/").unwrap();
+    for entry in entries {
+        println!("Inode {} Name {}", entry.inode_id, String::from_utf8_lossy(&entry.name));
+    }
+}
+
+#[test]
+fn test_remove_2() {
+    // Create a bunch of files and test removal.
+    let rd = RamDisk::new(64);
+    let mut fs = FileSystem::format(Arc::new(rd), 64, 80).unwrap();
+    for i in 0..10 {
+        let file_name = format!("/file_{}.txt", i);
+        fs.creat(&file_name, FileType::Regular, Mode::RW).unwrap();
+    }
+    let entries = fs.read_dir("/").unwrap();
+    for entry in entries {
+        println!("Inode {} Name {}", entry.inode_id, String::from_utf8_lossy(&entry.name));
+    }
+    for i in 0..10 {
+        let file_name = format!("/file_{}.txt", i);
+        fs.remove(&file_name, FileType::Regular).unwrap();
+    }
+    let entries = fs.read_dir("/").unwrap();
+    for entry in entries {
+        println!("Inode {} Name {}", entry.inode_id, String::from_utf8_lossy(&entry.name));
+    }
 }

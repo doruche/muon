@@ -1,15 +1,20 @@
 use alloc::{string::ToString, sync::Arc, vec::Vec};
-use crate::{directory::{dir_add_entry, dir_rm_entry}, file::{fread, fwrite}, free_inode, get_inode, path::{self, resolve, split}, read_superblock, structs::*, superblock, write_inode, write_superblock, BlockDevice, Error, Result, DOTDOT_NAME, DOT_NAME, ROOT_INODE_ID};
+use crate::{alloc_inode, bmap, directory::{dir_add_entry, dir_rm_entry}, file::{fread, fwrite}, free_inode, get_inode, mkdir, path::{self, resolve, split}, read_dir, read_superblock, structs::*, superblock, write_inode, write_superblock, BlockDevice, Error, Result, DOTDOT_NAME, DOT_NAME, ROOT_INODE_ID};
 use crate::structs::*;
 use crate::config::*;
 
 #[derive(Debug)]
 pub struct FileSystem<D: BlockDevice> {
     device: Arc<D>,
+    /// In-memory copy of the superblock.
     superblock: SuperBlock,
 }
 
 impl<D: BlockDevice> FileSystem<D> {
+
+    /// Formats the filesystem on the given block device.
+    /// Initializes the superblock and zeroes out the metadata blocks.
+    /// Returns a new `FileSystem` instance.
     pub fn format(device: Arc<D>, num_blocks: u32, num_inodes: u32) -> Result<Self> {
         let mut superblock = SuperBlock::new(num_blocks, num_inodes)?;
 
@@ -25,51 +30,45 @@ impl<D: BlockDevice> FileSystem<D> {
         for i in 0..superblock.inode_table_blocks {
             device.write_block(superblock.inode_table_start + i, &zero_block)?;
         }
-
-        // Zero out data blocks
-        for i in 0..superblock.free_blocks {
-            device.write_block(superblock.data_start + i, &zero_block)?;
-        }
-
-        write_superblock(device, superblock)?;
+        // No need to zero out data blocks, as they will be zeroed on allcations.
 
         // Initialize root inode
-        let mut root_inode = Inode {
-            id: ROOT_INODE_ID as u32,
-            ftype: crate::FileType::Directory,
-            size: 0,
-            blocks: 0,
-            links_cnt: 1,
-            direct_ptrs: [0; NUM_DIRECT_PTRS],
-            indirect_ptr: 0,
-        };
-        write_inode(device, &superblock, &mut root_inode)?;
-        set_inode_allocated(device, &mut superblock, ROOT_INODE_ID as u32)?;
-        write_superblock(device, superblock)?;
-    
-        // Ok(superblock);
+        let _ = alloc_inode(device.as_ref(),&mut superblock, FileType::Special, Mode::None)?;
 
-        let mut fs_inst = Self {
-            device: Arc::clone(&device),
-            superblock: superblock::format_fs(&*device, num_blocks, num_inodes)?,
-        };
-        // Create '.' and '..' entries in the root directory
-        let mut root_inode = get_inode(&*device, &fs_inst.superblock, ROOT_INODE_ID)?;
+        let mut root_inode = alloc_inode(
+            device.as_ref(), 
+            &mut superblock, 
+            FileType::Directory, 
+            Mode::RW
+        )?;
+        assert!(root_inode.id == ROOT_INODE_ID as u32, "Root inode ID mismatch");
+        
+        // On formating, root inode has no parent (or itself), so we have to set '.' and '..' entries manually.        
         dir_add_entry(
             &*device, 
-            &mut fs_inst.superblock, 
+            &mut superblock, 
             &mut root_inode, 
             &DirEntry::new(ROOT_INODE_ID, DOT_NAME)?
         )?;
         dir_add_entry(
             &*device, 
-            &mut fs_inst.superblock, 
+            &mut superblock, 
             &mut root_inode, 
             &DirEntry::new(ROOT_INODE_ID, DOTDOT_NAME)?
         )?;
+        root_inode.links_cnt = 2; // '.' and '..' entries
+        assert!(root_inode.size == 2 * DIR_ENTRY_SIZE as u64, "Root inode size mismatch");
+        assert!(root_inode.blocks == 1, "Root inode blocks count mismatch");
+        assert!(root_inode.direct_ptrs[0].unwrap() == superblock.data_start, "Root inode data pointer mismatch");
+        assert!(root_inode.size == DIR_ENTRY_SIZE as u64 * 2, "Root inode size mismatch");
+        write_inode(&*device, &mut superblock, &root_inode)?; // Write root inode to inode table
 
-        fs_inst.superblock.free_blocks -= 1; // Decrement free blocks for root inode
-        write_superblock(&*device, &fs_inst.superblock)?;
+        write_superblock(&*device, &superblock)?;
+
+        let mut fs_inst = Self {
+            device: Arc::clone(&device),
+            superblock,
+        };
 
         Ok(fs_inst)
     }
@@ -84,98 +83,85 @@ impl<D: BlockDevice> FileSystem<D> {
         })
     }
 
-    // Following methods directly operates on the fs instance, user should wrap a lock around it if needed.
-    pub fn open(&mut self, path: &str, mode: Mode, create: bool) -> Result<u32> {
-        match resolve(&*self.device, &mut self.superblock, path) {
-            Ok((_, inode_id)) => {
-                let inode = get_inode(&*self.device, &self.superblock, inode_id)?;
-                if inode.ftype != FileType::Regular {
-                    return Err(Error::NotRegular);
-                }
-                Ok(inode_id)
-            },
-            Err(Error::NotFound) if create => {
-                let (parent_path, file_name) = split(path);
-                println!("Creating file: {} in parent: {}", file_name, parent_path);
-                let (_, parent_inode_id) = resolve(&*self.device, &mut self.superblock, &parent_path)?;
-                println!("Parent inode ID: {}", parent_inode_id);
-                let mut parent_inode = get_inode(&*self.device, &mut self.superblock, parent_inode_id)?;
-                println!("Parent inode type: {:?}", parent_inode.ftype);
-                if parent_inode.ftype != FileType::Directory {
-                    return Err(Error::NotDirectory);
-                }
-                let new_inode_id = alloc_inode(&*self.device, &mut self.superblock)?;
-                let mut new_inode = get_inode(&*self.device, &mut self.superblock, new_inode_id)?;
-                new_inode.ftype = FileType::Regular;
-                new_inode.size = 0;
-                new_inode.blocks = 0;
-                new_inode.id = new_inode_id;
-                new_inode.direct_ptrs = [0; NUM_DIRECT_PTRS];
-                new_inode.indirect_ptr = 0;
-                new_inode.links_cnt = 1;
-                write_inode(&*self.device, &mut self.superblock, &new_inode)?; // Write new inode to inode table
-                dir_add_entry(
-                    &*self.device, 
-                    &mut self.superblock, 
-                    &mut parent_inode, 
-                    &DirEntry::new(new_inode_id, file_name.as_bytes())?
-                )?;
-                Ok(new_inode_id)
-            },
-            Err(_) => {
-                return Err(Error::NotFound);
-            }
-        }
+    pub fn get_inode(&self, inode_id: u32) -> Result<Inode> {
+        get_inode(self.device.as_ref(), &self.superblock, inode_id)
     }
 
-    pub fn read(&mut self, inode_id: u32, offset: usize, buf: &mut [u8]) -> Result<usize> {
-        let mut inode = get_inode(&*self.device, &self.superblock, inode_id)?;
-        if inode.ftype != FileType::Regular {
-            return Err(Error::NotRegular);
-        }
-
-        let bytes_read = fread(
-            &*self.device, 
-            &mut self.superblock, 
-            &mut inode, 
-            offset, 
-            buf
-        )?;
-
-        Ok(bytes_read)
-    }
-
-    pub fn write(&mut self, inode_id: u32, offset: usize, buf: &[u8]) -> Result<usize> {
-        let mut inode = get_inode(&*self.device, &self.superblock, inode_id)?;
-        if inode.ftype != FileType::Regular {
-            return Err(Error::NotRegular);
-        }
-
-        let bytes_written = fwrite(
-            &*self.device,
-            &mut self.superblock,
-            &mut inode,
-            offset,
-            buf
-        )?;
-
-        Ok(bytes_written)
-    }
-
-    pub fn close(&mut self, inode_id: u32) -> Result<()> {
-        // TODO: Sync the inode back to disk if needed
+    /// Unmounts the filesystem, writing the superblock back to the device.
+    /// This should be called before the device is closed to ensure all metadata is saved.
+    pub fn unmount(&mut self) -> Result<()> {
+        write_superblock(self.device.as_ref(), &self.superblock)?;
+        self.device.flush()?;
         Ok(())
     }
+    
+    /// Query the inode ID for the given path.
+    /// Returns the inode ID and its file type.
+    pub fn lookup(&mut self, path: &str) -> Result<(u32, FileType)> {
+        let (_, inode_id) = resolve(&*self.device, &mut self.superblock, path)?;
+        let inode = get_inode(&*self.device, &self.superblock, inode_id)?;
+        Ok((inode_id, inode.ftype))
+    }
 
-    pub fn rm(&mut self, path: &str) -> Result<()> {
+    pub fn creat(
+        &mut self,
+        path: &str,
+        file_type: FileType,
+        mode: Mode,
+    ) -> Result<u32> {
+        let (parent_path, file_name) = split(path);
+        let (_, parent_inode_id) = resolve(self.device.as_ref(), &mut self.superblock, &parent_path)?;
+        let mut parent_inode = get_inode(&*self.device, &mut self.superblock, parent_inode_id)?;
+        if parent_inode.ftype != FileType::Directory {
+            return Err(Error::NotDirectory);
+        }
+        println!("parent inode: {:?}", parent_inode);
+        match file_type {
+            FileType::Regular => {
+                let mut new_inode = alloc_inode(
+                    self.device.as_ref(), 
+                    &mut self.superblock,
+                    FileType::Regular, 
+                    mode
+                )?;
+                dir_add_entry(
+                    self.device.as_ref(),
+                    &mut self.superblock,
+                    &mut parent_inode,
+                    &DirEntry::new(new_inode.id, file_name.as_bytes())?
+                )?;
+                new_inode.links_cnt = 1;
+                write_inode(self.device.as_ref(), &self.superblock, &parent_inode)?;
+                write_inode(self.device.as_ref(), &mut self.superblock, &new_inode)?;
+                Ok(new_inode.id)
+            },
+            FileType::Directory => {
+                let dir_inode_id = mkdir(
+                    self.device.as_ref(), 
+                    &mut self.superblock, 
+                    &mut parent_inode, 
+                    file_name.as_bytes()
+                )?;
+                Ok(dir_inode_id)
+            },
+            _ => return Err(Error::InvalidArgument),
+        }
+    }
+
+    pub fn remove(&mut self, path: &str, ftype: FileType) -> Result<()> {
         let (parent_path, file_name) = split(path);
         let (_, parent_inode_id) = resolve(&*self.device, &mut self.superblock, &parent_path)?;
         let mut parent_inode = get_inode(&*self.device, &mut self.superblock, parent_inode_id)?;
-        let (_, inode_id) = resolve(&*self.device, &mut self.superblock, path)?;
-        let mut file_inode = get_inode(&*self.device, &mut self.superblock, inode_id)?;
-        
         if parent_inode.ftype != FileType::Directory {
             return Err(Error::NotDirectory);
+        }
+        println!("[remove] parent inode: {:?}", parent_inode);
+        let (_, inode_id) = resolve(&*self.device, &mut self.superblock, path)?;
+        println!("[remove] inode_id: {}", inode_id);
+        let mut file_inode = get_inode(&*self.device, &mut self.superblock, inode_id)?;
+        
+        if !matches!(ftype, FileType::Regular | FileType::Directory) {
+            return Err(Error::InvalidArgument);
         }
 
         dir_rm_entry(
@@ -185,45 +171,31 @@ impl<D: BlockDevice> FileSystem<D> {
             file_name.as_bytes(),
         )?;
 
-        // Free the inode
+        // Free the inode if it hard links count reaches 0.
         file_inode.links_cnt -= 1;
-        if file_inode.links_cnt == 0 {
-            free_inode(&*self.device, &mut self.superblock, &mut file_inode)?;
+        if (file_inode.links_cnt == 0 && ftype == FileType::Regular) ||
+           (file_inode.links_cnt == 1 && ftype == FileType::Directory) {
+            free_inode(self.device.as_ref(), &mut self.superblock, file_inode.id)?;
         } else {
-            write_inode(&*self.device, &mut self.superblock, &file_inode)?;
+            write_inode(self.device.as_ref(), &mut self.superblock, &file_inode)?;
         }
 
         Ok(())
     }
 
-    /// Create a hard link to an existing file.
-    pub fn link(&mut self, target_path: &str, link_path: &str) -> Result<()> {
-        let (_, target_inode_id) = resolve(&*self.device, &mut self.superblock, target_path)?;
-        let mut target_inode = get_inode(&*self.device, &mut self.superblock, target_inode_id)?;
-        
-        if target_inode.ftype != FileType::Regular {
-            return Err(Error::NotRegular);
-        }
-
-        let (parent_path, link_name) = split(link_path);
-        let (_, parent_inode_id) = resolve(&*self.device, &mut self.superblock, &parent_path)?;
-        let mut parent_inode = get_inode(&*self.device, &mut self.superblock, parent_inode_id)?;
-
-        if parent_inode.ftype != FileType::Directory {
+    pub fn read_dir(&mut self, path: &str) -> Result<Vec<DirEntry>> {
+        let (_, inode_id) = resolve(&*self.device, &mut self.superblock, path)?;
+        let mut inode = get_inode(&*self.device, &self.superblock, inode_id)?;
+        if inode.ftype != FileType::Directory {
             return Err(Error::NotDirectory);
         }
-
-        dir_add_entry(
-            &*self.device,
-            &mut self.superblock,
-            &mut parent_inode,
-            &DirEntry::new(target_inode_id, link_name.as_bytes())?
+        let entries = read_dir(
+            self.device.as_ref(), 
+            &mut self.superblock, 
+            &mut inode
         )?;
 
-        target_inode.links_cnt += 1;
-        write_inode(&*self.device, &mut self.superblock, &target_inode)?;
-
-        Ok(())
+        Ok(entries)
     }
  
     pub fn root_inode_id(&self) -> u32 {
@@ -236,5 +208,9 @@ impl<D: BlockDevice> FileSystem<D> {
 
     pub fn device(&self) -> Arc<D> {
         Arc::clone(&self.device)
+    }
+
+    pub fn dump(&self) -> String {
+        format!("{:#?}", self.superblock)
     }
 }
