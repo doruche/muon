@@ -12,8 +12,8 @@ use crate::error::FsError;
 /// Set the first fit bit in the bitmap.
 /// 'Fit' means that it will set the first bit that is not equal to 'value'.
 /// Returns the item ID of the bit that was set or cleared.
-fn set_first_fit_bit<D: BlockDevice>(
-    device: &D,
+fn set_first_fit_bit(
+    device: &impl BlockDevice,
     bitmap_start: u32,
     bitmap_blocks: u32,
     total_items: u32,
@@ -55,8 +55,8 @@ fn set_first_fit_bit<D: BlockDevice>(
 /// 'total_items' seems unnecessary here, but we keep it for forcing bounds checking,
 /// otherwise we have to mark this function as unsafe.
 /// Returns previously set value of the bit.
-fn set_bit_at<D: BlockDevice>(
-    device: &D,
+fn set_bit_at(
+    device: &impl BlockDevice,
     bitmap_start: u32,
     bitmap_blocks: u32,
     item_id: u32,
@@ -95,8 +95,8 @@ fn set_bit_at<D: BlockDevice>(
 /// Allocates a new data block, setting bit in the data bitmap.
 /// Returns the actual block ID of the allocated block.
 /// Index in data region can be calculated as 'result - data_start'.
-pub fn alloc_data_block<D: BlockDevice>(
-    device: &D,
+pub fn alloc_data_block(
+    device: &impl BlockDevice,
     superblock: &mut SuperBlock,
 ) -> Result<u32> {
     let block_id = set_first_fit_bit(
@@ -106,13 +106,18 @@ pub fn alloc_data_block<D: BlockDevice>(
         superblock.num_blocks - superblock.data_start,
         true)?;
     superblock.free_blocks -= 1;
-    // TODO: Should be done by the upper layer, not here.
     write_superblock(device, superblock)?;
+
+    // Zero out the block
+    let zero_block = Box::new([0u8; BLOCK_SIZE]);
+    device.write_block(block_id + superblock.data_start, zero_block.as_ref())?;
+
     Ok(block_id + superblock.data_start)
 }
 
-pub fn free_data_block<D: BlockDevice>(
-    device: &D,
+/// Frees a data block, clearing bit in the data bitmap.
+pub fn free_data_block(
+    device: &impl BlockDevice,
     superblock: &mut SuperBlock,
     block_id: u32,
 ) -> Result<()> {
@@ -134,8 +139,10 @@ pub fn free_data_block<D: BlockDevice>(
     Ok(())
 }
 
-pub fn alloc_inode<D: BlockDevice>(
-    device: &D,
+/// Allocates a new inode, setting bit in the inode bitmap.
+/// Only called by inode::alloc_inode.
+pub(crate) fn alloc_inode_id(
+    device: &impl BlockDevice,
     superblock: &mut SuperBlock
 ) -> Result<u32> {
     let inode_id = set_first_fit_bit(
@@ -149,8 +156,10 @@ pub fn alloc_inode<D: BlockDevice>(
     Ok(inode_id)
 }
 
-pub fn free_inode<D: BlockDevice>(
-    device: &D,
+/// Frees an inode, clearing bit in the inode bitmap.
+/// Only called by inode::free_inode.
+pub(crate) fn free_inode_id(
+    device: &impl BlockDevice,
     superblock: &mut SuperBlock,
     inode_id: u32,
 ) -> Result<()> {
@@ -167,20 +176,20 @@ pub fn free_inode<D: BlockDevice>(
     Ok(())
 }
 
-pub fn set_inode_allocated(
-    device: &impl BlockDevice,
-    superblock: &mut SuperBlock,
-    inode_id: u32,
-) -> Result<()> {
-    set_bit_at(
-        device,
-        superblock.inode_bitmap_start,
-        superblock.inode_bitmap_blocks,
-        inode_id,
-        superblock.num_inodes,
-        true
-    )?;
-    superblock.free_inodes -= 1;
-    write_superblock(device, superblock)?;
-    Ok(())
-}
+// pub fn set_inode_allocated(
+//     device: &impl BlockDevice,
+//     superblock: &mut SuperBlock,
+//     inode_id: u32,
+// ) -> Result<()> {
+//     set_bit_at(
+//         device,
+//         superblock.inode_bitmap_start,
+//         superblock.inode_bitmap_blocks,
+//         inode_id,
+//         superblock.num_inodes,
+//         true
+//     )?;
+//     superblock.free_inodes -= 1;
+//     write_superblock(device, superblock)?;
+//     Ok(())
+// }

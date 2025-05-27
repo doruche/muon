@@ -5,6 +5,7 @@ pub enum FsError {
     OutOfSpace,
     OutOfInodes,
     OutOfBounds,
+    CacheMiss,
     PermissionDenied,
     InvalidSuperBlock,
     InvalidBlockId,

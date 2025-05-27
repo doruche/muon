@@ -22,7 +22,7 @@ pub struct SuperBlock {
     pub inode_table_blocks: u32, // Size of the inode table in blocks
     pub data_start: u32, // Block number where data blocks start
 
-    pub reserved: [u8; 456],
+    // pub reserved: [u8; 456],
 }
 
 #[repr(u8)]
@@ -52,12 +52,25 @@ pub enum Mode {
 pub struct Inode {
     pub ftype: FileType,
     pub id: u32,
+    /// Number of data blocks, excluding the block used to contain indirect pointers.
     pub blocks: u32,
-    pub links_cnt: u32, // When links_cnt decreases to 0 and all file descriptors are closed, the inode can be freed.
-    pub indirect_ptr: u32,
-    pub direct_ptrs: [u32; NUM_DIRECT_PTRS],
+    // When links_cnt decreases to 0 and all file descriptors are closed, the inode can be freed.
+    pub links_cnt: u32, 
+    pub indirect_ptr: Option<u32>,
+    pub direct_ptrs: [Option<u32>; NUM_DIRECT_PTRS],
     pub size: u64,
-    pub reserved: [u8; 44],
+}
+
+impl Inode {
+    pub const ZERO: Self = Self {
+        ftype: FileType::Regular,
+        id: 0,
+        blocks: 0,
+        links_cnt: 0,
+        indirect_ptr: None,
+        direct_ptrs: [None; NUM_DIRECT_PTRS],
+        size: 0,
+    };
 }
 
 #[repr(C)]

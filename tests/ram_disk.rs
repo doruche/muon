@@ -89,7 +89,6 @@ fn test_inode() {
         indirect_ptr: 0,
         direct_ptrs: [0; NUM_DIRECT_PTRS],
         size: 1024,
-        reserved: [0; 44],
     };
     write_inode(&rd, &superblock, &inode).unwrap();
     let mut read_inode = get_inode(&rd, &superblock, 3).unwrap();

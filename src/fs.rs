@@ -1,5 +1,5 @@
 use alloc::{string::ToString, sync::Arc, vec::Vec};
-use crate::{bitmap::alloc_inode, directory::{dir_add_entry, dir_rm_entry}, file::{fread, fwrite}, free_inode, get_inode, path::{self, resolve, split}, read_superblock, structs::*, superblock, write_inode, write_superblock, BlockDevice, Error, Result, DOTDOT_NAME, DOT_NAME, ROOT_INODE_ID};
+use crate::{directory::{dir_add_entry, dir_rm_entry}, file::{fread, fwrite}, free_inode, get_inode, path::{self, resolve, split}, read_superblock, structs::*, superblock, write_inode, write_superblock, BlockDevice, Error, Result, DOTDOT_NAME, DOT_NAME, ROOT_INODE_ID};
 use crate::structs::*;
 use crate::config::*;
 
@@ -11,6 +11,44 @@ pub struct FileSystem<D: BlockDevice> {
 
 impl<D: BlockDevice> FileSystem<D> {
     pub fn format(device: Arc<D>, num_blocks: u32, num_inodes: u32) -> Result<Self> {
+        let mut superblock = SuperBlock::new(num_blocks, num_inodes)?;
+
+        let zero_block = Box::new([0u8; BLOCK_SIZE]);
+        
+        // Zero out metadata blocks
+        for i in 0..superblock.data_bitmap_blocks {
+            device.write_block(superblock.data_bitmap_start + i, &zero_block)?;
+        }
+        for i in 0..superblock.inode_bitmap_blocks {
+            device.write_block(superblock.inode_bitmap_start + i, &zero_block)?;
+        }
+        for i in 0..superblock.inode_table_blocks {
+            device.write_block(superblock.inode_table_start + i, &zero_block)?;
+        }
+
+        // Zero out data blocks
+        for i in 0..superblock.free_blocks {
+            device.write_block(superblock.data_start + i, &zero_block)?;
+        }
+
+        write_superblock(device, superblock)?;
+
+        // Initialize root inode
+        let mut root_inode = Inode {
+            id: ROOT_INODE_ID as u32,
+            ftype: crate::FileType::Directory,
+            size: 0,
+            blocks: 0,
+            links_cnt: 1,
+            direct_ptrs: [0; NUM_DIRECT_PTRS],
+            indirect_ptr: 0,
+        };
+        write_inode(device, &superblock, &mut root_inode)?;
+        set_inode_allocated(device, &mut superblock, ROOT_INODE_ID as u32)?;
+        write_superblock(device, superblock)?;
+    
+        // Ok(superblock);
+
         let mut fs_inst = Self {
             device: Arc::clone(&device),
             superblock: superblock::format_fs(&*device, num_blocks, num_inodes)?,
@@ -36,6 +74,8 @@ impl<D: BlockDevice> FileSystem<D> {
         Ok(fs_inst)
     }
 
+    /// Mounts the filesystem from the given block device.
+    /// Reads the superblock and initializes the filesystem instance.
     pub fn mount(device: Arc<D>) -> Result<Self> {
         let superblock = read_superblock(&*device)?;
         Ok(Self {
@@ -73,7 +113,6 @@ impl<D: BlockDevice> FileSystem<D> {
                 new_inode.direct_ptrs = [0; NUM_DIRECT_PTRS];
                 new_inode.indirect_ptr = 0;
                 new_inode.links_cnt = 1;
-                new_inode.reserved = [0; 44];
                 write_inode(&*self.device, &mut self.superblock, &new_inode)?; // Write new inode to inode table
                 dir_add_entry(
                     &*self.device, 

@@ -8,14 +8,13 @@
 //! - Inode Table
 //! - Data Blocks
 //! 
-//! Muon's 7 layers (from bottom to top):
-//! 1. Block Device: Abstraction for block storage devices.     Storage device synchronization
-//! 2. Cache: Optional caching layer for performance.           Storage device synchronization
-//! 3. Bitmap: Manages allocation of data blocks and inodes.    Superblock/bitmap synchronization
-//! 4. Inode: Represents files and directories                  Inode synchronization
-//! 5. Directory: Manages directory entries and structure.      Inode synchronization
-//! 6. File: Represents file operations and data access.        Inode synchronization
-//! 7. MuonFS: The main file system interface for users.
+//! Muon's 6 layers (from bottom to top):
+//! 1. Block Device: Abstraction for low level devices.         Storage device synchronization  | User implemented (hardware-specific)
+//! 2. Cache: Optional caching layer for performance.           Storage device synchronization  | User implemented (sync, strategy, etc.)
+//! 3. Inode: Represents file metadata and operations.          Inode synchronization           | Fs implemented
+//! 4. Directory/Path: Manages directory entries and structure. Inode synchronization           | Fs implemented
+//! 5. File: Represents file operations and data access.        Inode synchronization           | Fs implemented
+//! 6. MuonFS: The main file system interface for users.                                        | User implemented (ofile, process, etc.)
 
 #![allow(unused)]
 //#![no_std]
