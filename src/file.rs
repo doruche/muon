@@ -19,21 +19,34 @@ pub fn fread(
     }
 
     let mut bytes_read = 0;
-    let mut current_offset = offset as u64;
+    let mut current_offset = offset;
+    let mut current_relative_block_id = current_offset / BLOCK_SIZE;
     let mut remain_buf_len = buffer.len();
     let mut block_buf = Box::new([0u8; BLOCK_SIZE]);
 
-    while remain_buf_len > 0 && current_offset < inode.size as u64 {
-        let block_id = bmap(device, superblock, inode, current_offset, false)?;
-        device.read_block(block_id, block_buf.as_mut())?;
-
-        let bytes_in_cur_block = BLOCK_SIZE.min(inode.size as usize - current_offset as usize);
-        let bytes_to_copy = bytes_in_cur_block.min(remain_buf_len);
-        buffer[bytes_read..bytes_read + bytes_to_copy]
-            .copy_from_slice(&block_buf[..bytes_to_copy]);
-        bytes_read += bytes_to_copy;
-        remain_buf_len -= bytes_to_copy;
-        current_offset += bytes_to_copy as u64;
+    while remain_buf_len > 0 {
+        let bytes_to_read = BLOCK_SIZE.min(remain_buf_len);
+        if bytes_to_read == 0 {
+            break;
+        }
+        let current_block_id = bmap(
+            device,
+            superblock,
+            inode,
+            current_relative_block_id as u64 * BLOCK_SIZE as u64,
+            false,
+        )?;
+        
+        device.read_block(current_block_id, block_buf.as_mut())?;
+        let start_offset = current_offset % BLOCK_SIZE;
+        let end_offset = start_offset + bytes_to_read;
+        buffer[bytes_read..bytes_read + bytes_to_read]
+            .copy_from_slice(&block_buf[start_offset..end_offset]);
+        
+        bytes_read += bytes_to_read;
+        remain_buf_len -= bytes_to_read;
+        current_offset += bytes_to_read;
+        current_relative_block_id = current_offset / BLOCK_SIZE;
     }
 
     Ok(bytes_read)
@@ -56,30 +69,39 @@ pub fn fwrite(
     }
 
     let mut bytes_written = 0;
-    let mut current_offset = offset as u64;
+    let mut current_offset = offset;
+    let mut current_relative_block_id = current_offset / BLOCK_SIZE;
     let mut remain_buf_len = buffer.len();
     let mut block_buf = Box::new([0u8; BLOCK_SIZE]);
 
     while remain_buf_len > 0 {
-        let block_id = bmap(device, superblock, inode, current_offset, true)?;
-        device.read_block(block_id, block_buf.as_mut())?;
-
-        let bytes_in_cur_block = BLOCK_SIZE.min(inode.size as usize - current_offset as usize);
-        let bytes_to_copy = bytes_in_cur_block.min(remain_buf_len);
+        let bytes_to_write = BLOCK_SIZE.min(remain_buf_len);
+        if bytes_to_write == 0 {
+            break;
+        }
+        let current_block_id = bmap(
+            device,
+            superblock,
+            inode,
+            current_relative_block_id as u64 * BLOCK_SIZE as u64,
+            true,
+        )?;
         
-        block_buf[..bytes_to_copy].copy_from_slice(&buffer[bytes_written..bytes_written + bytes_to_copy]);
-        device.write_block(block_id, block_buf.as_ref())?;
-
-        bytes_written += bytes_to_copy;
-        remain_buf_len -= bytes_to_copy;
-        current_offset += bytes_to_copy as u64;
+        device.read_block(current_block_id, block_buf.as_mut())?;
+        let start_offset = current_offset % BLOCK_SIZE;
+        block_buf[start_offset..start_offset + bytes_to_write]
+            .copy_from_slice(&buffer[bytes_written..bytes_written + bytes_to_write]);
+        device.write_block(current_block_id, block_buf.as_ref())?;
+        bytes_written += bytes_to_write;
+        remain_buf_len -= bytes_to_write;
+        current_offset += bytes_to_write;
+        current_relative_block_id = current_offset / BLOCK_SIZE;
     }
 
-    if current_offset > inode.size as u64 {
-        // inode.blocks already updated in bmap
+    if current_offset >= inode.size as usize {
         inode.size = current_offset as u64;
+        write_inode(device, superblock, inode)?;
     }
-    write_inode(device, superblock, inode)?;
 
     Ok(bytes_written)
 }

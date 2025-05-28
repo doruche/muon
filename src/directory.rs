@@ -282,7 +282,7 @@ pub fn dir_rm_entry(
     Ok(inode_id_to_remove.unwrap())
 }
 
-pub fn is_dir_empty(
+pub fn dir_is_empty(
     device: &impl BlockDevice,
     superblock: &mut SuperBlock,
     dir_inode: &Inode,
@@ -293,6 +293,8 @@ pub fn is_dir_empty(
     
     // Check if the directory has any entries other than '.' and '..'
     let num_dirents = (dir_inode.size / DIR_ENTRY_SIZE as u64) as usize;
+    println!("Checking if directory {} is empty, num dirents: {}", 
+        dir_inode.id, num_dirents);
     if num_dirents == 2 {
         return Ok(true); // Only '.' and '..' entries
     } else if num_dirents < 2 {
@@ -340,7 +342,7 @@ pub fn mkdir(
         parent_inode, 
         &DirEntry::new(dir_inode_id, dir_name)?
     )?;
-
+    dir_inode.links_cnt += 1;
     dir_add_entry(
         device, 
         superblock, 

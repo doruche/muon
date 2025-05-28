@@ -1,5 +1,5 @@
 use alloc::{string::ToString, sync::Arc, vec::Vec};
-use crate::{alloc_inode, bmap, directory::{dir_add_entry, dir_rm_entry}, file::{fread, fwrite}, free_inode, get_inode, mkdir, path::{self, resolve, split}, read_dir, read_superblock, structs::*, superblock, write_inode, write_superblock, BlockDevice, Error, Result, DOTDOT_NAME, DOT_NAME, ROOT_INODE_ID};
+use crate::{alloc_inode, bmap, dir_is_empty, directory::{dir_add_entry, dir_rm_entry}, file::{fread, fwrite}, free_inode, get_inode, mkdir, path::{self, resolve, split}, read_dir, read_superblock, structs::*, superblock, write_inode, write_superblock, BlockDevice, Error, Result, DOTDOT_NAME, DOT_NAME, ROOT_INODE_ID};
 use crate::structs::*;
 use crate::config::*;
 
@@ -163,6 +163,13 @@ impl<D: BlockDevice> FileSystem<D> {
         if !matches!(ftype, FileType::Regular | FileType::Directory) {
             return Err(Error::InvalidArgument);
         }
+        if file_inode.ftype != ftype {
+            return Err(Error::InvalidArgument);
+        }
+
+        if ftype == FileType::Directory && !dir_is_empty(self.device.as_ref(), &mut self.superblock, &file_inode)? {
+            return Err(Error::DirNotEmpty);
+        }
 
         dir_rm_entry(
             &*self.device,
@@ -197,6 +204,48 @@ impl<D: BlockDevice> FileSystem<D> {
 
         Ok(entries)
     }
+
+    pub fn fread(
+        &mut self,
+        path: &str,
+        offset: usize,
+        buf: &mut [u8],
+    ) -> Result<usize> {
+        let (_, inode_id) = resolve(&*self.device, &mut self.superblock, path)?;
+        let mut inode = get_inode(&*self.device, &self.superblock, inode_id)?;
+        if inode.ftype != FileType::Regular {
+            return Err(Error::NotRegular);
+        }
+        let bytes_read = fread(
+            self.device.as_ref(),
+            &mut self.superblock,
+            &mut inode,
+            offset,
+            buf,
+        )?;
+        Ok(bytes_read)   
+    }
+
+    pub fn fwrite(
+        &mut self,
+        path: &str,
+        offset: usize,
+        buf: &[u8],
+    ) -> Result<usize> {
+        let (_, inode_id) = resolve(&*self.device, &mut self.superblock, path)?;
+        let mut inode = get_inode(&*self.device, &self.superblock, inode_id)?;
+        if inode.ftype != FileType::Regular {
+            return Err(Error::NotRegular);
+        }
+        let bytes_written = fwrite(
+            self.device.as_ref(),
+            &mut self.superblock,
+            &mut inode,
+            offset,
+            buf,
+        )?;
+        Ok(bytes_written)
+    }
  
     pub fn root_inode_id(&self) -> u32 {
         ROOT_INODE_ID as u32
@@ -211,6 +260,6 @@ impl<D: BlockDevice> FileSystem<D> {
     }
 
     pub fn dump(&self) -> String {
-        format!("{:#?}", self.superblock)
+        format!("{:?}", self.superblock)
     }
 }

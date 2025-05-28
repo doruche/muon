@@ -17,6 +17,7 @@ pub enum FsError {
     WriteError,
     NotFound,
     AlreadyExists,
+    DirNotEmpty,
     NotDirectory,
     NotRegular,
     NotReadable,

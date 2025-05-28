@@ -125,6 +125,7 @@ pub fn free_inode(
 
 /// Block map. Maps a file offset to a block ID in the filesystem.
 /// The offset is required to be divided by BLOCK_SIZE.
+/// Would not manage the size of inode, which is caller's responsibility.
 pub fn bmap(
     device: &impl BlockDevice,
     superblock: &mut SuperBlock,
@@ -137,10 +138,6 @@ pub fn bmap(
     }
 
     let block_offset = file_offset / BLOCK_SIZE as u64;
-
-    if create && file_offset >= inode.size {
-        inode.size = file_offset + 1;
-    }
 
     // Direct blocks
     if block_offset < NUM_DIRECT_PTRS as u64 {
