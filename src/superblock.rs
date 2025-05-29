@@ -15,6 +15,7 @@ pub fn read_superblock(device: &impl BlockDevice) -> Result<SuperBlock> {
     
     // Here we simply check the magic number and block size, for conceptual purposes.
     if superblock.magic != MAGIC {
+        println!("here");
         return Err(FsError::InvalidSuperBlock);
     }
     if superblock.block_size != BLOCK_SIZE as u32 {

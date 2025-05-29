@@ -6,6 +6,7 @@ pub enum FsError {
     OutOfInodes,
     OutOfBounds,
     CacheMiss,
+    CacheEvict(u32), // Block ID of the evicted cache entry
     PermissionDenied,
     InvalidSuperBlock,
     InvalidBlockId,

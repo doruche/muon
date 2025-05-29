@@ -83,6 +83,11 @@ impl<D: BlockDevice> FileSystem<D> {
         })
     }
 
+    pub fn flush(&mut self) -> Result<()> {
+        self.device.flush()?;
+        Ok(())
+    }
+
     pub fn get_inode(&self, inode_id: u32) -> Result<Inode> {
         get_inode(self.device.as_ref(), &self.superblock, inode_id)
     }
@@ -245,6 +250,39 @@ impl<D: BlockDevice> FileSystem<D> {
             buf,
         )?;
         Ok(bytes_written)
+    }
+
+    /// Creates a hard link to the target file with the given link name.
+    /// The link target must be a regular file.
+    /// The link name must not already exist in the target's parent directory.
+    /// The link name must be an absolute path.
+    /// Returns the inode ID of the linked file.
+    pub fn link(
+        &mut self,
+        target: &str,
+        link_name: &str,
+    ) -> Result<u32> {
+        let (parent_path, link_name) = path::split(link_name);
+        let (_, parent_inode_id) = resolve(&*self.device, &mut self.superblock, &parent_path)?;
+        let mut parent_inode = get_inode(&*self.device, &mut self.superblock, parent_inode_id)?;
+        if parent_inode.ftype != FileType::Directory {
+            return Err(Error::NotDirectory);
+        }
+        let (_, target_inode_id) = resolve(&*self.device, &mut self.superblock, target)?;
+        let mut target_inode = get_inode(&*self.device, &mut self.superblock, target_inode_id)?;
+        if target_inode.ftype != FileType::Regular {
+            return Err(Error::NotRegular);
+        }
+        dir_add_entry(
+            self.device.as_ref(),
+            &mut self.superblock,
+            &mut parent_inode,
+            &DirEntry::new(target_inode_id, link_name.as_bytes())?,
+        )?;
+        target_inode.links_cnt += 1;
+        write_inode(self.device.as_ref(), &mut self.superblock, &target_inode)?;
+
+        Ok(target_inode_id)
     }
  
     pub fn root_inode_id(&self) -> u32 {

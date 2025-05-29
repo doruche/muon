@@ -4,13 +4,14 @@
 
 use crate::{BlockDevice, Error, Result, BLOCK_SIZE};
 
-pub trait Cache : Send + Sync {
+pub trait Cache: Send + Sync {
     fn write_cache(&self, block_id: u32, buf: &[u8; BLOCK_SIZE]) -> Result<()>;
     
     fn read_cache(&self, block_id: u32, buf: &mut [u8; BLOCK_SIZE]) -> Result<()>;
     
     fn flush(&self, device: &impl BlockDevice) -> Result<()>;
     
+    fn evict(&self, device: &impl BlockDevice, block_id: u32) -> Result<()>;
 }
 
 pub struct Cached<D: BlockDevice, C: Cache> {
@@ -46,7 +47,16 @@ where
             Ok(_) => Ok(()),
             Err(Error::CacheMiss) => {
                 self.device.read_block(block_id, buf)?;
-                self.cache.write_cache(block_id, buf)?;
+                match self.cache.write_cache(block_id, buf) {
+                    Ok(_) => {
+                        ;
+                    },
+                    Err(Error::CacheEvict(evicted_block_id)) => {
+                        self.cache.evict(&self.device, evicted_block_id)?;
+                        self.cache.write_cache(block_id, buf)?;
+                    },
+                    Err(e) => return Err(e),
+                }
                 Ok(())
             },
             Err(e) => Err(e),
@@ -54,7 +64,19 @@ where
     }
 
     fn write_block(&self, block_id: u32, buf: &[u8; crate::BLOCK_SIZE]) -> Result<()> {
-        self.cache.write_cache(block_id, buf)?;
+        match self.cache.write_cache(block_id, buf) {
+            Ok(()) => {
+                // Writing succeeded.
+                ;   
+            }
+            Err(Error::CacheEvict(evicted_block_id)) => {
+                // Cache full, need to flush the evicted block first.
+                self.cache.evict(&self.device, evicted_block_id)?;
+                // Then write to the cache
+                self.cache.write_cache(block_id, buf)?;
+            },
+            Err(e) => return Err(e),
+        }
         Ok(())
     }
 

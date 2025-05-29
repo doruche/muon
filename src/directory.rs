@@ -109,6 +109,7 @@ pub fn dir_lookup(
 }
 
 /// Add a new directory entry to a parent directory inode.
+/// Would not increase links count of the child inode, which is caller's responsibility.
 /// Child inode must be already allocated and initialized.
 pub fn dir_add_entry(
     device: &impl BlockDevice,

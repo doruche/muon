@@ -1,5 +1,5 @@
 //! Muon is a tiny file system primarily designed for CafOS.
-//! For simplicity, no support for permissions, timestamps, or other advanced features.
+//! For simplicity, no support for logging or other advanced features.
 //! 
 //! Muon File System's linear layout:
 //! - Superblock
@@ -8,13 +8,12 @@
 //! - Inode Table
 //! - Data Blocks
 //! 
-//! Muon's 6 layers (from bottom to top):
-//! 1. Block Device: Abstraction for low level devices.         Storage device synchronization  | User implemented (hardware-specific)
-//! 2. Cache: Optional caching layer for performance.           Storage device synchronization  | User implemented (sync, strategy, etc.)
-//! 3. Inode: Represents file metadata and operations.          Inode synchronization           | Fs implemented
-//! 4. Directory/Path: Manages directory entries and structure. Inode synchronization           | Fs implemented
-//! 5. File: Represents file operations and data access.        Inode synchronization           | Fs implemented
-//! 6. MuonFS: The main file system interface for users.                                        | User implemented (ofile, process, etc.)
+//! Muon's 5-layered hierarchy (from bottom to top):
+//! 1. Block Device: Abstraction for low level devices.            | User implemented (hardware-specific)
+//! 2. Cache: Optional caching layer for performance.              | User implemented (sync, strategy, etc.)
+//! 3. Inode: Represents file metadata and operations.             | Fs implemented
+//! 4. Directory: Manages directory entries and structure.         | Fs implemented
+//! 5. File: Represents file operations and data access.           | Fs implemented
 
 #![allow(unused)]
 //#![no_std]
@@ -46,3 +45,4 @@ pub use file::*;
 pub use fs::*;
 pub use error::FsError as Error;
 pub use error::Result;
+pub use cache::*;
