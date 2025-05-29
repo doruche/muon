@@ -165,7 +165,7 @@ impl<D: BlockDevice> FileSystem<D> {
         println!("[remove] inode_id: {}", inode_id);
         let mut file_inode = get_inode(&*self.device, &mut self.superblock, inode_id)?;
         
-        if !matches!(ftype, FileType::Regular | FileType::Directory) {
+        if matches!(ftype, FileType::Special) {
             return Err(Error::InvalidArgument);
         }
         if file_inode.ftype != ftype {
@@ -183,10 +183,18 @@ impl<D: BlockDevice> FileSystem<D> {
             file_name.as_bytes(),
         )?;
 
-        // Free the inode if it hard links count reaches 0.
+        // Free the inode if hard links count reaches 0.
         file_inode.links_cnt -= 1;
-        if (file_inode.links_cnt == 0 && ftype == FileType::Regular) ||
-           (file_inode.links_cnt == 1 && ftype == FileType::Directory) {
+        if ftype == FileType::Directory {
+            // .
+            file_inode.links_cnt -= 1;
+            // ..
+            parent_inode.links_cnt -= 1;
+            write_inode(self.device.as_ref(), &mut self.superblock, &parent_inode)?;
+        }
+
+        if file_inode.links_cnt == 0 {
+            println!("[remove] Freeing inode: {}", file_inode.id);
             free_inode(self.device.as_ref(), &mut self.superblock, file_inode.id)?;
         } else {
             write_inode(self.device.as_ref(), &mut self.superblock, &file_inode)?;
@@ -217,9 +225,13 @@ impl<D: BlockDevice> FileSystem<D> {
         buf: &mut [u8],
     ) -> Result<usize> {
         let (_, inode_id) = resolve(&*self.device, &mut self.superblock, path)?;
-        let mut inode = get_inode(&*self.device, &self.superblock, inode_id)?;
+        let mut inode = get_inode(&*self.device, &self.superblock, inode_id)?; 
         if inode.ftype != FileType::Regular {
             return Err(Error::NotRegular);
+        }
+
+        if !matches!(inode.mode, Mode::Read|Mode::RW|Mode::RWE) {
+            return Err(Error::PermissionDenied);
         }
         let bytes_read = fread(
             self.device.as_ref(),
@@ -241,6 +253,9 @@ impl<D: BlockDevice> FileSystem<D> {
         let mut inode = get_inode(&*self.device, &self.superblock, inode_id)?;
         if inode.ftype != FileType::Regular {
             return Err(Error::NotRegular);
+        }
+        if !matches!(inode.mode, Mode::Write|Mode::RW|Mode::RWE) {
+            return Err(Error::PermissionDenied);
         }
         let bytes_written = fwrite(
             self.device.as_ref(),
@@ -284,7 +299,7 @@ impl<D: BlockDevice> FileSystem<D> {
 
         Ok(target_inode_id)
     }
- 
+
     pub fn root_inode_id(&self) -> u32 {
         ROOT_INODE_ID as u32
     }

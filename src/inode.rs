@@ -65,6 +65,7 @@ pub fn alloc_inode(
     let inode = Inode {
         id,
         ftype,
+        mode,
         blocks: 0,
         links_cnt: 0, // Increased by the first link.
         size: 0,

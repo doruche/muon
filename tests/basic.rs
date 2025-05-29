@@ -37,6 +37,7 @@ fn test_inode() {
     let inode = Inode {
         ftype: FileType::Regular,
         blocks: 3,
+        mode: Mode::RW,
         id: 3,
         links_cnt: 1,
         indirect_ptr: None,

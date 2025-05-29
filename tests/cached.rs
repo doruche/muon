@@ -1,5 +1,5 @@
 #![allow(unused)]
-use std::{collections::VecDeque, sync::{Arc, Mutex}};
+use std::{collections::VecDeque, path, sync::{Arc, Mutex}};
 
 use common::{LruCache, RamDisk};
 use muon::{BlockDevice, Cache, Cached, FileSystem, FileType, Mode, Result, BLOCK_SIZE};
@@ -78,4 +78,79 @@ fn test_hard_link() {
     fs.remove("/test_dir/test_link.txt", FileType::Regular).unwrap();
     log!("File System after removing hard link: {}", fs.dump());
     fs.flush().unwrap();
+}
+
+#[test]
+fn test_mkdir_3() {
+    let rd = RamDisk::new(64);
+    let cache = LruCache::new(4);
+    let cached = Cached::new(rd, cache);
+    let mut fs = FileSystem::format(Arc::new(cached), 64, 80).unwrap();
+
+    log!("File System initialized: {}", fs.dump());
+
+    // Create:
+    // /a
+    // /a/b
+    // /a/b/c
+    // /x
+    // /x/y
+    fs.creat("/a", FileType::Directory, Mode::RW).unwrap();
+    fs.creat("/a/b", FileType::Directory, Mode::RW).unwrap();
+    fs.creat("/a/b/c", FileType::Directory, Mode::RW).unwrap();
+    fs.creat("/x", FileType::Directory, Mode::RW).unwrap();
+    fs.creat("/x/y", FileType::Directory, Mode::RW).unwrap();
+    log!("File System after creating directories: {}", fs.dump());
+    read_dir_recursive(&mut fs, "/", 3);
+
+    // Remove
+    fs.remove("/x/y", FileType::Directory).unwrap();
+    fs.remove("/a/b/c", FileType::Directory).unwrap();
+    fs.remove("/a/b", FileType::Directory).unwrap();
+    fs.remove("/a", FileType::Directory).unwrap();
+    fs.remove("/x", FileType::Directory).unwrap();
+    log!("File System after removing directories: {}", fs.dump());
+    read_dir_recursive(&mut fs, "/", 3);
+
+    // allocated a new inode
+    let new_inode_id = fs.creat("/x/file", FileType::Regular, Mode::RW);
+    // this should fail
+    assert!(new_inode_id.is_err(), "Creating a file in a removed directory should fail");
+    log!("{:?}", new_inode_id.unwrap_err());
+
+    let new_inode_id = fs.creat("/file", FileType::Regular, Mode::RW).unwrap();
+    let inode = fs.get_inode(new_inode_id).unwrap();
+    log!("New file inode created: {:?}", inode);
+    log!("File System after creating a new file: {}", fs.dump());
+}
+
+fn read_dir_recursive(fs: &mut FileSystem<impl BlockDevice>, path: &str, depth: usize) {
+    if depth == 0 {
+        return;
+    }
+
+    let entries = fs.read_dir(path).unwrap();
+    log!("Directory entries in '{}':", path);
+    let mut next_level_entries = vec![];
+    for entry in entries {
+        let name = String::from_utf8_lossy(&entry.name);
+        log!("  Inode ID: {}, Name: {}", entry.inode_id, name);
+        
+        // If the entry is a directory, read its contents recursively.
+        if entry.inode_id != 0 && fs.get_inode(entry.inode_id).unwrap().ftype == FileType::Directory {
+            if entry.name_eq(".".as_bytes()) || entry.name_eq("..".as_bytes()) {
+                continue; // Skip current and parent directory entries.
+            }
+            let next_path = if path == "/" {
+                format!("/{}", name)
+            } else {
+                format!("{}/{}", path, name)
+            };
+            next_level_entries.push(next_path);   
+        }
+    }
+    log!("End of directory entries in '{}'", path);
+    for next_path in next_level_entries {
+        read_dir_recursive(fs, &next_path, depth - 1);
+    }
 }

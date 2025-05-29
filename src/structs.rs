@@ -51,6 +51,7 @@ pub enum Mode {
 #[derive(Debug, Clone, Copy)]
 pub struct Inode {
     pub ftype: FileType,
+    pub mode: Mode,
     pub id: u32,
     /// Number of data blocks, excluding the block used to contain indirect pointers.
     pub blocks: u32,
@@ -64,6 +65,7 @@ pub struct Inode {
 impl Inode {
     pub const ZERO: Self = Self {
         ftype: FileType::Regular,
+        mode: Mode::None,
         id: 0,
         blocks: 0,
         links_cnt: 0,

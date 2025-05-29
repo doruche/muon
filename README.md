@@ -1,8 +1,8 @@
 # Muon
 __(Under development)__
 
-Muon is a mini file system implemented in Rust, inspired by _vsfs_ (_very simple file system_, see _OSTEP_) , and primarily written for CafOS (author's operating system project). It is architected in a quite direct way easy to understand and extend. 
-For simplicity, Muon is supposed to be used with a single file system per disk, and does not support multiple partitions or complex file system features (e.g. journaling).
+Muon is a mini file system implemented in Rust, inspired by _vsfs_ (_very simple file system_, see _OSTEP_) , and primarily written for CafOS (author's operating system project). It is architected in a quite direct way easy to understand and extend.
+<br/>For simplicity, Muon is supposed to be used with a single file system per disk, and does not support advanced file system features (e.g. journaling, snapshots).
 ## Architecture
 Muon is organized in a 5-layer hierarchy, with each layer providing a specific functionality, shown below:
 - __Block Device__  (`block_dev.rs`):
