@@ -61,17 +61,9 @@ pub fn alloc_inode(
     mode: Mode,
 ) -> Result<Inode> {
     let id = bitmap::alloc_inode_id(device, superblock)?;
+
     // Superblock already updated by alloc_inode_id.
-    let inode = Inode {
-        id,
-        ftype,
-        mode,
-        blocks: 0,
-        links_cnt: 0, // Increased by the first link.
-        size: 0,
-        indirect_ptr: None,
-        direct_ptrs: [None; NUM_DIRECT_PTRS],
-    };
+    let inode = Inode::new(ftype, mode, id);
     write_inode(device, superblock, &inode)?;
     Ok(inode)
 }
@@ -87,29 +79,38 @@ pub fn free_inode(
 ) -> Result<Inode> {
     let inode = get_inode(device, superblock, inode_id)?;
 
-    //Direct blocks
-    for block_id in inode.direct_ptrs.iter() {
-        if let Some(block_id) = block_id {
-            free_data_block(device, superblock, *block_id)?;
-        }
-    }
-    
-    //Indirect block
-    if let Some(indirect_ptr) = inode.indirect_ptr {
-        let mut ptr_buf = Box::new([0u8; BLOCK_SIZE]);
-        device.read_block(indirect_ptr, ptr_buf.as_mut())?;
-        let ptrs = unsafe {
-            core::slice::from_raw_parts_mut(
-                ptr_buf.as_mut_ptr() as *mut u32,
-                PTRS_PER_BLOCK
-            )
-        };
-        for &block_id in ptrs.iter() {
-            if block_id != 0 {
-                free_data_block(device, superblock, block_id)?;
+    match inode.ftype {
+        FileType::Special => unimplemented!(),
+        FileType::Symlink => {
+            // Symlinks do not have data blocks, for now.
+            // So do nothing here.
+        },
+        _ => {
+            //Direct blocks
+            for block_id in inode.get_block_ptrs()?.direct.iter() {
+                if let Some(block_id) = block_id {
+                    free_data_block(device, superblock, *block_id)?;
+                }
+            }
+
+            //Indirect block
+            if let Some(indirect_ptr) = inode.get_block_ptrs()?.indirect {
+                let mut ptr_buf = Box::new([0u8; BLOCK_SIZE]);
+                device.read_block(indirect_ptr, ptr_buf.as_mut())?;
+                let ptrs = unsafe {
+                    core::slice::from_raw_parts_mut(
+                        ptr_buf.as_mut_ptr() as *mut u32,
+                        PTRS_PER_BLOCK
+                    )
+                };
+                for &block_id in ptrs.iter() {
+                    if block_id != 0 {
+                        free_data_block(device, superblock, block_id)?;
+                    }
+                }
+                free_data_block(device, superblock, indirect_ptr)?;
             }
         }
-        free_data_block(device, superblock, indirect_ptr)?;
     }
 
     bitmap::free_inode_id(device, superblock, inode_id)?;
@@ -138,17 +139,21 @@ pub fn bmap(
         return Err(FsError::InvalidArgument);
     }
 
+    if inode.ftype != FileType::Regular && inode.ftype != FileType::Directory {
+        return Err(FsError::InvalidFileType);
+    }
+
     let block_offset = file_offset / BLOCK_SIZE as u64;
 
     // Direct blocks
     if block_offset < NUM_DIRECT_PTRS as u64 {
-        let block_id = match inode.direct_ptrs[block_offset as usize] {
+        let block_id = match inode.get_block_ptrs().unwrap().direct[block_offset as usize] {
             Some(block_id) => {
                 block_id
             },
             None if create => {
                 let block_id = alloc_data_block(device, superblock)?;
-                inode.direct_ptrs[block_offset as usize] = Some(block_id);
+                inode.get_block_ptrs_mut().unwrap().direct[block_offset as usize] = Some(block_id);
                 inode.blocks += 1;
                 write_inode(device, superblock, &inode)?;
                 block_id
@@ -161,13 +166,13 @@ pub fn bmap(
     // Indirect blocks
     let indirect_offset = block_offset - NUM_DIRECT_PTRS as u64;
     if indirect_offset < PTRS_PER_BLOCK as u64 {
-        let indirect_block_id =  match inode.indirect_ptr {
+        let indirect_block_id =  match inode.get_block_ptrs().unwrap().indirect {
             Some(indirect_block_id) => {
                 indirect_block_id
             },
             None if create => {
                 let indirect_block_id = alloc_data_block(device, superblock)?;
-                inode.indirect_ptr = Some(indirect_block_id);
+                inode.get_block_ptrs_mut().unwrap().indirect = Some(indirect_block_id);
                 indirect_block_id
             },
             _ => return Err(FsError::OutOfBounds),

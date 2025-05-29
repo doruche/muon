@@ -412,7 +412,6 @@ pub fn read_dir(
     Ok(entries)
 }
 
-
 #[cfg(test)]
 mod test {
     use super::*;

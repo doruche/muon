@@ -46,6 +46,45 @@ pub enum Mode {
     None = 0b000, // No permissions
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct BlockPtr {
+    pub indirect: Option<u32>,
+    pub direct: [Option<u32>; NUM_DIRECT_PTRS],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub union InodePtr {
+    block_ptr: BlockPtr,    // Normal inode with direct and indirect pointers
+    path: [u8; MAX_PATH_LEN], // Symlink inode with a path
+}
+
+impl core::fmt::Debug for InodePtr {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        unsafe {
+            match self {
+                Self { block_ptr: BlockPtr {..} } => {
+                    write!(f, "{:?}", self.block_ptr)
+                },
+                Self { path } => {
+                    let path_str = core::str::from_utf8(path).unwrap_or("<invalid>");
+                    write!(f, "Path: {}", path_str)
+                },
+            }
+        }
+    }
+}
+
+impl InodePtr {
+    pub const ZERO: Self = Self {
+        block_ptr: BlockPtr { indirect: None, direct: [None; NUM_DIRECT_PTRS] },
+    };
+
+    pub fn new() -> Self {
+        Self::ZERO
+    }
+}
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -57,8 +96,7 @@ pub struct Inode {
     pub blocks: u32,
     // When links_cnt decreases to 0 and all file descriptors are closed, the inode can be freed.
     pub links_cnt: u32, 
-    pub indirect_ptr: Option<u32>,
-    pub direct_ptrs: [Option<u32>; NUM_DIRECT_PTRS],
+    pub inode_ptr: InodePtr,
     pub size: u64,
 }
 
@@ -69,10 +107,74 @@ impl Inode {
         id: 0,
         blocks: 0,
         links_cnt: 0,
-        indirect_ptr: None,
-        direct_ptrs: [None; NUM_DIRECT_PTRS],
+        inode_ptr: InodePtr { block_ptr: BlockPtr { indirect: None, direct: [None; NUM_DIRECT_PTRS] } },
         size: 0,
     };
+
+    pub fn new(ftype: FileType, mode: Mode, id: u32) -> Self {
+        Self {
+            ftype,
+            mode,
+            id,
+            blocks: 0,
+            links_cnt: 0,
+            inode_ptr: InodePtr::new(),
+            size: 0,
+        }
+    }
+}
+
+impl Inode {
+    pub fn is_directory(&self) -> bool {
+        self.ftype == FileType::Directory
+    }
+
+    pub fn is_regular_file(&self) -> bool {
+        self.ftype == FileType::Regular
+    }
+
+    pub fn is_symlink(&self) -> bool {
+        self.ftype == FileType::Symlink
+    }
+
+    pub fn is_special(&self) -> bool {
+        self.ftype == FileType::Special
+    }
+
+    pub fn get_block_ptrs(&self) -> Result<&BlockPtr> {
+        if self.ftype != FileType::Regular && self.ftype != FileType::Directory {
+            return Err(Error::InvalidFileType);
+        }
+        unsafe {
+            Ok(&self.inode_ptr.block_ptr)
+        }
+    }
+    
+    pub fn get_block_ptrs_mut(&mut self) -> Result<&mut BlockPtr> {
+        if self.ftype != FileType::Regular && self.ftype != FileType::Directory {
+            return Err(Error::InvalidFileType);
+        }
+        unsafe {
+            Ok(&mut self.inode_ptr.block_ptr)
+        }
+    }
+    pub fn get_path(&self) -> Result<&[u8; MAX_PATH_LEN]> {
+        if self.ftype != FileType::Symlink {
+            return Err(Error::NotSymlink);
+        }
+        unsafe {
+            Ok(&self.inode_ptr.path)
+        }
+    }
+
+    pub fn get_path_mut(&mut self) -> Result<&mut [u8; MAX_PATH_LEN]> {
+        if self.ftype != FileType::Symlink {
+            return Err(Error::NotSymlink);
+        }
+        unsafe {
+            Ok(&mut self.inode_ptr.path)
+        }
+    }
 }
 
 #[repr(C)]

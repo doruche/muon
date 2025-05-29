@@ -59,7 +59,6 @@ impl<D: BlockDevice> FileSystem<D> {
         root_inode.links_cnt = 2; // '.' and '..' entries
         assert!(root_inode.size == 2 * DIR_ENTRY_SIZE as u64, "Root inode size mismatch");
         assert!(root_inode.blocks == 1, "Root inode blocks count mismatch");
-        assert!(root_inode.direct_ptrs[0].unwrap() == superblock.data_start, "Root inode data pointer mismatch");
         assert!(root_inode.size == DIR_ENTRY_SIZE as u64 * 2, "Root inode size mismatch");
         write_inode(&*device, &mut superblock, &root_inode)?; // Write root inode to inode table
 
@@ -114,7 +113,7 @@ impl<D: BlockDevice> FileSystem<D> {
         file_type: FileType,
         mode: Mode,
     ) -> Result<u32> {
-        let (parent_path, file_name) = split(path);
+        let (parent_path, file_name) = split(path)?;
         let (_, parent_inode_id) = resolve(self.device.as_ref(), &mut self.superblock, &parent_path)?;
         let mut parent_inode = get_inode(&*self.device, &mut self.superblock, parent_inode_id)?;
         if parent_inode.ftype != FileType::Directory {
@@ -154,7 +153,7 @@ impl<D: BlockDevice> FileSystem<D> {
     }
 
     pub fn remove(&mut self, path: &str, ftype: FileType) -> Result<()> {
-        let (parent_path, file_name) = split(path);
+        let (parent_path, file_name) = split(path)?;
         let (_, parent_inode_id) = resolve(&*self.device, &mut self.superblock, &parent_path)?;
         let mut parent_inode = get_inode(&*self.device, &mut self.superblock, parent_inode_id)?;
         if parent_inode.ftype != FileType::Directory {
@@ -277,7 +276,7 @@ impl<D: BlockDevice> FileSystem<D> {
         target: &str,
         link_name: &str,
     ) -> Result<u32> {
-        let (parent_path, link_name) = path::split(link_name);
+        let (parent_path, link_name) = path::split(link_name)?;
         let (_, parent_inode_id) = resolve(&*self.device, &mut self.superblock, &parent_path)?;
         let mut parent_inode = get_inode(&*self.device, &mut self.superblock, parent_inode_id)?;
         if parent_inode.ftype != FileType::Directory {
@@ -299,6 +298,57 @@ impl<D: BlockDevice> FileSystem<D> {
 
         Ok(target_inode_id)
     }
+
+    /// Creates a symbolic link to the target file with the given link name.
+    /// Returns the inode ID of the symlink.
+    pub fn symlink(
+        &mut self,
+        target: &str,
+        link_name: &str,
+    ) -> Result<u32> {
+        if target.as_bytes().len() > MAX_PATH_LEN {
+            return Err(Error::PathTooLong);
+        }
+
+        let (parent_path, link_name) = path::split(link_name)?;
+        let (_, parent_inode_id) = resolve(&*self.device, &mut self.superblock, &parent_path)?;
+        let mut parent_inode = get_inode(&*self.device, &mut self.superblock, parent_inode_id)?;
+        if parent_inode.ftype != FileType::Directory {
+            return Err(Error::NotDirectory);
+        }
+        let mut new_inode = alloc_inode(
+            self.device.as_ref(),
+            &mut self.superblock,
+            FileType::Symlink,
+            Mode::Read,
+        )?;
+        let path_buf = new_inode.get_path_mut()?;
+        path_buf[..target.as_bytes().len()].copy_from_slice(target.as_bytes());
+        dir_add_entry(
+            self.device.as_ref(),
+            &mut self.superblock,
+            &mut parent_inode,
+            &DirEntry::new(new_inode.id, link_name.as_bytes())?,
+        )?;
+        new_inode.links_cnt = 1; // symlink itself
+        write_inode(self.device.as_ref(), &mut self.superblock, &new_inode)?;
+        
+        Ok(new_inode.id)
+    }
+
+    /// Reads the target of a symbolic link.
+    /// Returns a byte array containing the target path.
+    pub fn read_link(
+        &mut self,
+        link_name: &str,
+        buf: &mut [u8; MAX_PATH_LEN],
+    ) -> Result<()> {
+        let (_, inode_id) = resolve(self.device.as_ref(), &mut self.superblock, link_name)?;
+        let inode = get_inode(self.device.as_ref(), &self.superblock, inode_id)?;
+        let path_buf = inode.get_path()?;
+        buf.copy_from_slice(path_buf);
+        Ok(())
+    } 
 
     pub fn root_inode_id(&self) -> u32 {
         ROOT_INODE_ID as u32

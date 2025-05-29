@@ -4,6 +4,7 @@ pub const BLOCK_SIZE: usize = 512;
 pub const SUPERBLOCK_ID: u32 = 0; // Block ID for the superblock
 pub const ROOT_INODE_ID: u32 = 1; // Inode ID for the root directory
 pub const MAX_FSIZE: usize = 1024 * 1024 * 1024; // 1 GiB
+pub const MAX_PATH_LEN: usize = 104;
 pub const MAX_INODES: usize = 1024; // Maximum number of inodes
 pub const INODE_SIZE: usize = 128;  // Distance between inodes in the inode table
 
@@ -17,3 +18,4 @@ pub const DOTDOT_NAME: &[u8; 2] = b"..";
 pub const NUM_DIRECT_PTRS: usize = 12; // Number of direct pointers in an inode
 pub const NUM_INDIRECT_PTRS: usize = 1; // Number of indirect pointers in an inode
 pub const PTRS_PER_BLOCK: usize = BLOCK_SIZE / 4; // Number of pointers per block (assuming 32-bit pointers)
+pub const SYMLOOP_MAX: usize = 16; // Maximum number of symbolic link hops

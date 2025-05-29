@@ -34,16 +34,7 @@ fn test_inode() {
     let rd = RamDisk::new(64);
     let superblock = SuperBlock::new(64, 80).unwrap();
     muon::write_superblock(&rd, &superblock).unwrap();
-    let inode = Inode {
-        ftype: FileType::Regular,
-        blocks: 3,
-        mode: Mode::RW,
-        id: 3,
-        links_cnt: 1,
-        indirect_ptr: None,
-        direct_ptrs: [None; NUM_DIRECT_PTRS],
-        size: 1024,
-    };
+    let inode = Inode::new(FileType::Regular, Mode::Execute, 3);
     write_inode(&rd, &superblock, &inode).unwrap();
     let mut read_inode = get_inode(&rd, &superblock, 3).unwrap();
 }
@@ -117,6 +108,12 @@ fn test_lookup() {
     let (inode_id, ftype) = fs.lookup("/test.txt").unwrap();
     let inode = fs.get_inode(inode_id).unwrap();
     assert_eq!(inode.ftype, FileType::Regular);
+
+    // Look up a directory
+    fs.creat("/test_dir", FileType::Directory, Mode::RW).unwrap();
+    let (dir_inode_id, dir_ftype) = fs.lookup("/test_dir").unwrap();
+    let dir_inode = fs.get_inode(dir_inode_id).unwrap();
+    log!("Directory inode ID: {}, Type: {:?}", dir_inode_id, dir_ftype);
 }
 
 #[test]
@@ -531,4 +528,67 @@ fn test_hard_link() {
     // Now remove the hard link.
     fs.remove("/test_dir/test_link.txt", FileType::Regular).unwrap();
     log!("File System after removing hard link: {}", fs.dump());
+}
+
+#[test]
+fn test_lookup_dot() {
+    let rd = RamDisk::new(64);
+    let mut fs = FileSystem::format(Arc::new(rd), 64, 80).unwrap();
+    
+    // Create a directory and a file inside it.
+    fs.creat("/test_dir", FileType::Directory, Mode::RW).unwrap();
+    fs.creat("/test_dir/test_file.txt", FileType::Regular, Mode::RW).unwrap();
+    
+    // Lookup the directory using '.'.
+    let (inode_id, ftype) = fs.lookup("/test_dir/.").unwrap();
+    assert_eq!(ftype, FileType::Directory, "Lookup '.' should return a directory");
+    let inode = fs.get_inode(inode_id).unwrap();
+    assert_eq!(inode.ftype, FileType::Directory, "Inode type should be Directory for '.'");
+    
+    // Lookup the file using '.'.
+    let (file_inode_id, file_ftype) = fs.lookup("/test_dir/test_file.txt").unwrap();
+    assert_eq!(file_ftype, FileType::Regular, "Lookup 'test_file.txt' should return a regular file");
+    let file_inode = fs.get_inode(file_inode_id).unwrap();
+    assert_eq!(file_inode.ftype, FileType::Regular, "Inode type should be Regular for 'test_file.txt'");
+
+    // Test multiple dots in the path.
+    let (inode_id, ftype) = fs.lookup("/././test_dir/./test_file.txt").unwrap();
+    let file_inode = fs.get_inode(inode_id).unwrap();
+    assert_eq!(ftype, FileType::Regular, "Lookup with multiple dots should return a regular file");
+}
+
+#[test]
+fn test_lookup_dotdot() {
+    let rd = RamDisk::new(64);
+    let mut fs = FileSystem::format(Arc::new(rd), 64, 80).unwrap();
+    
+    // Create a directory and a file inside it.
+    fs.creat("/test_dir", FileType::Directory, Mode::RW).unwrap();
+    fs.creat("/test_dir/test_file.txt", FileType::Regular, Mode::RW).unwrap();
+    fs.creat("/test_dir/inner_dir", FileType::Directory, Mode::RW).unwrap();
+    fs.creat("/test_dir/inner_dir/inner_file.txt", FileType::Regular, Mode::RW).unwrap();
+    log!("File System after creating directories and files: {}", fs.dump());
+    
+    let (inode_id, ftype) = fs.lookup("/test_dir/..").unwrap();
+    assert_eq!(ftype, FileType::Directory, "Lookup '..' should return a directory");
+    let inode = fs.get_inode(inode_id).unwrap();
+    log!("Inode for '/test_dir/..': {:?}", inode);
+
+    // Lookup with multiple dots in the path.
+    let (inode_id, ftype) = fs.lookup("/test_dir/inner_dir/../..").unwrap();
+    assert_eq!(ftype, FileType::Directory, "Lookup '/test_dir/inner_dir/../..' should return a directory");
+    let inode = fs.get_inode(inode_id).unwrap();
+    log!("Inode for '/test_dir/inner_dir/../..': {:?}", inode);
+
+    // Lookup with multiple dots in the path.
+    let (inode_id, ftype) = fs.lookup("/test_dir/../test_dir/inner_dir/../test_file.txt").unwrap();
+    assert_eq!(ftype, FileType::Regular, "Lookup '/test_dir/../test_dir/inner_dir/../test_file.txt' should return a regular file");
+    let file_inode = fs.get_inode(inode_id).unwrap();
+    log!("Inode for '/test_dir/../test_dir/inner_dir/../test_file.txt': {:?}", file_inode);
+    
+    // Check the root directory.
+    let (root_inode_id, root_ftype) = fs.lookup("/../.././..").unwrap();
+    assert_eq!(root_ftype, FileType::Directory, "Lookup '/../.././..' should return the root directory");
+    let root_inode = fs.get_inode(root_inode_id).unwrap();
+    log!("Inode for '/../.././..': {:?}", root_inode);
 }
