@@ -18,6 +18,10 @@ pub fn fread(
         return Err(Error::NotReadable);
     }
 
+    if buffer.len() + offset > inode.size as usize {
+        return Err(Error::OutOfBounds);
+    }
+
     let mut bytes_read = 0;
     let mut current_offset = offset;
     let mut current_relative_block_id = current_offset / BLOCK_SIZE;

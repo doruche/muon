@@ -433,9 +433,9 @@ fn test_file_rw_3() {
     log!("Data read from file: {:?}", String::from_utf8_lossy(&buf));
 
     // Read the second part of the file (the hole).
-    let mut hole_buf = vec![0u8; 20]; // Read 20 bytes from the hole.
+    let mut hole_buf = vec![0u8; 13]; // Read 13 bytes from the hole.
     let bytes_read = fs.fread("/test_dir/test.txt", 7 * BLOCK_SIZE, &mut hole_buf).unwrap();
-    assert_eq!(bytes_read, 20, "Bytes read mismatch for hole");
+    assert_eq!(bytes_read, 13, "Bytes read mismatch for hole");
     log!("Data read from hole: {:?}", String::from_utf8_lossy(&hole_buf));
 
     // Assure that we can't read beyond allocated data blocks.
@@ -591,4 +591,195 @@ fn test_lookup_dotdot() {
     assert_eq!(root_ftype, FileType::Directory, "Lookup '/../.././..' should return the root directory");
     let root_inode = fs.get_inode(root_inode_id).unwrap();
     log!("Inode for '/../.././..': {:?}", root_inode);
+}
+
+#[test]
+fn test_symlink() {
+    let rd = RamDisk::new(64);
+    let mut fs = FileSystem::format(Arc::new(rd), 64, 80).unwrap();
+
+    // Create a file and a symlink to it.
+    fs.creat("/test.txt", FileType::Regular, Mode::RW).unwrap();
+    let symlink_inode_id = fs.symlink("/test.txt", "/test_link").unwrap();
+    let symlink_inode = fs.get_inode(symlink_inode_id).unwrap();
+    log!("Symlink inode created: {:?}", symlink_inode);
+
+    // Read the symlink.
+    let mut target_buf = [0; 104];
+    let target = fs.read_link("/test_link", &mut target_buf).unwrap();
+    log!("Symlink target: {:?}", String::from_utf8_lossy(&target_buf));
+}
+
+#[test]
+fn test_symlink_2() {
+    let rd = RamDisk::new(64);
+    let mut fs = FileSystem::format(Arc::new(rd), 64, 80).unwrap();
+
+    // Test symlinks as intermediate steps in paths.
+    fs.creat("/test_dir", FileType::Directory, Mode::RW).unwrap();
+    fs.creat("/test_dir/test.txt", FileType::Regular, Mode::RW).unwrap();
+    let symlink_inode_id = fs.symlink("/test_dir/test.txt", "/test_link").unwrap();
+    let symlink_inode = fs.get_inode(symlink_inode_id).unwrap();
+    log!("Symlink inode created: {:?}", symlink_inode);
+
+    // Read the symlink.
+    let mut target_buf = [0; 104];
+    let target = fs.read_link("/test_link", &mut target_buf).unwrap();
+    log!("Symlink target: {:?}", String::from_utf8_lossy(&target_buf));
+    // Now try to write the file through the symlink.
+    let data = b"Hello, symlink!";
+    let bytes_written = fs.fwrite("/test_link", 0, data).unwrap();
+    assert_eq!(bytes_written, data.len(), "Bytes written mismatch through symlink");
+    // Read the data back from the original file.
+    let mut buf = vec![0u8; data.len()];
+    let bytes_read = fs.fread("/test_dir/test.txt", 0, &mut buf).unwrap();
+    assert_eq!(bytes_read, data.len(), "Bytes read mismatch from original file through symlink");
+    assert_eq!(buf, data, "Data read from original file does not match written data through symlink");
+
+    // What about relative symlinks?
+    let symlink_inode_id = fs.symlink("test.txt", "/test_dir/test_link").unwrap();
+    let symlink_inode = fs.get_inode(symlink_inode_id).unwrap();
+    log!("Relative symlink inode created: {:?}", symlink_inode);
+    // Read the relative symlink.
+    let mut target_buf = [0; 104];
+    let target = fs.read_link("/test_dir/test_link", &mut target_buf).unwrap();
+    log!("Relative symlink target: {:?}", String::from_utf8_lossy(&target_buf));
+    // Now try to write the file through the relative symlink.
+    let data = b"Hello, relative symlink!";
+    let bytes_written = fs.fwrite("/test_dir/test_link", 0, data).unwrap();
+    assert_eq!(bytes_written, data.len(), "Bytes written mismatch through relative symlink");
+    // Read the data back from the original file.
+    let mut buf = vec![0u8; data.len()];
+    let bytes_read = fs.fread("/test_dir/test.txt", 0, &mut buf).unwrap();
+    assert_eq!(bytes_read, data.len(), "Bytes read mismatch from original file through relative symlink");
+    assert_eq!(buf, data, "Data read from original file does not match written data through relative symlink");
+}
+
+#[test]
+fn test_symlink_3() {
+    // More complex symlink scenarios.
+    let rd = RamDisk::new(64);
+    let mut fs = FileSystem::format(Arc::new(rd), 64, 80).unwrap();
+
+    fs.creat("/a", FileType::Directory, Mode::RW).unwrap();
+    fs.creat("/a/b", FileType::Directory, Mode::RW).unwrap();
+    fs.creat("/a/b/file.txt", FileType::Regular, Mode::RW).unwrap();
+    fs.creat("/c", FileType::Directory, Mode::RW).unwrap();
+    let symlink_inode_id = fs.symlink("/a/b/file.txt", "/c/link_abs").unwrap();
+    let mut target_buf = [0; 104];
+    let target = fs.read_link("/c/link_abs", &mut target_buf).unwrap();
+    log!("Symlink target: {:?}", String::from_utf8_lossy(&target_buf));
+    // Write through the symlink.
+    let data = b"Hello, complex symlink!";
+    let bytes_written = fs.fwrite("/c/link_abs", 0, data).unwrap();
+    // Read the data back from the original file.
+    let mut buf = vec![0u8; data.len()];
+    let bytes_read = fs.fread("/a/b/file.txt", 0, &mut buf).unwrap();
+    log!("Bytes read from original file: {}", bytes_read);
+    log!("Data read from original file: {:?}", String::from_utf8_lossy(&buf));
+
+    // Check inode of original file.
+    let file_inode_id = fs.lookup("/a/b/file.txt").unwrap().0;
+    let file_inode = fs.get_inode(file_inode_id).unwrap();
+    log!("Inode of original file: {:?}", file_inode);
+    assert_eq!(file_inode.links_cnt, 1);
+    // Remove the symlink.
+    fs.remove("/c/link_abs", FileType::Symlink).unwrap();
+    let file_inode_id = fs.lookup("/a/b/file.txt").unwrap().0;
+    let file_inode = fs.get_inode(file_inode_id).unwrap();
+    log!("Inode of original file after removing symlink: {:?}", file_inode);
+    assert_eq!(file_inode.links_cnt, 1, "Link count should remain 1 after removing symlink");
+
+    // Test dangling symlink.
+    let dangling_symlink_inode_id = fs.symlink("/non_existent_file.txt", "/dangling_link").unwrap();
+    let res = fs.lookup("/dangling_link");
+    assert!(res.is_err(), "Expected error when looking up dangling symlink");
+    if let Err(e) = res {
+        log!("Expected error when looking up dangling symlink: {:?}", e);
+    }
+
+    // What about a symlink to a directory?
+    fs.creat("/d", FileType::Directory, Mode::RW).unwrap();
+    let dir_symlink_inode_id = fs.symlink("/d", "/c/dir_link").unwrap();
+    fs.creat("/c/dir_link/file.txt", FileType::Regular, Mode::RW).unwrap();
+    let mut target_buf = [0; 104];
+    let target = fs.read_link("/c/dir_link", &mut target_buf).unwrap();
+    log!("Directory symlink target: {:?}", String::from_utf8_lossy(&target_buf));
+    // Write through the directory symlink.
+    let data = b"Hello, directory symlink!";
+    let bytes_written = fs.fwrite("/c/dir_link/file.txt", 0, data).unwrap();
+    assert_eq!(bytes_written, data.len(), "Bytes written mismatch through directory symlink");
+    log!("Bytes written to file through directory symlink: {}", bytes_written);
+    // Read the data back from the original file.
+    let mut buf = vec![0u8; data.len()];
+    let bytes_read = fs.fread("/d/file.txt", 0, &mut buf).unwrap();
+    assert_eq!(bytes_read, data.len(), "Bytes read mismatch from original file through directory symlink");
+    assert_eq!(buf, data, "Data read from original file does not match written data through directory symlink");
+    log!("Data read from original file through directory symlink: {:?}", String::from_utf8_lossy(&buf));
+
+    // What about a relative symlink to a directory?
+    let relative_symlink_inode_id = fs.symlink("dir_link", "/c/relative_dir_link").unwrap();
+    let mut target_buf = [0; 104];
+    let target = fs.read_link("/c/relative_dir_link", &mut target_buf).unwrap();
+    log!("Relative directory symlink target: {:?}", String::from_utf8_lossy(&target_buf));
+    // Write through the relative directory symlink.
+    let data = b"Hello, relative directory symlink!";
+    let bytes_written = fs.fwrite("/c/relative_dir_link/file.txt", 0, data).unwrap();
+    assert_eq!(bytes_written, data.len(), "Bytes written mismatch through relative directory symlink");
+    log!("Bytes written to file through relative directory symlink: {}", bytes_written);
+    // Read the data back from the original file.
+    let mut buf = vec![0u8; data.len()];
+    let bytes_read = fs.fread("/d/file.txt", 0, &mut buf).unwrap();
+    assert_eq!(bytes_read, data.len(), "Bytes read mismatch from original file through relative directory symlink");
+    assert_eq!(buf, data, "Data read from original file does not match written data through relative directory symlink");
+    log!("Data read from original file through relative directory symlink: {:?}", String::from_utf8_lossy(&buf));
+
+    // Can we detect a loop in symlinks?
+    fs.creat("/e", FileType::Directory, Mode::RW).unwrap();
+    fs.symlink("l1", "/e/l2").unwrap();
+    fs.symlink("l2", "/e/l1").unwrap();
+    let res = fs.lookup("/e/l1");
+    assert!(res.is_err(), "Expected error when looking up symlink loop");
+    if let Err(e) = res {
+        log!("Expected error when looking up symlink loop: {:?}", e);
+    }
+
+    // What if symlinks with . and .. together?
+    fs.symlink("/a/b", "/link").unwrap();
+    let (inode_id, ftype) = fs.lookup("/link/../b/./file.txt").unwrap();
+    assert_eq!(ftype, FileType::Regular, "Lookup with . and .. should return a regular file");
+    let file_inode = fs.get_inode(inode_id).unwrap();
+    log!("Inode for '/link/../b/./c/file.txt': {:?}", file_inode);
+
+    // What if symlink itself contains . and ..?
+    fs.symlink("/a/b/../b/./file.txt", "/link_with_dots").unwrap();
+    let (inode_id, ftype) = fs.lookup("/link_with_dots").unwrap();
+    assert_eq!(ftype, FileType::Regular, "Lookup with . and .. in symlink should return a regular file");
+    let file_inode = fs.get_inode(inode_id).unwrap();
+    log!("Inode for '/link_with_dots': {:?}", file_inode);
+
+    // A huge test... Now let's do the last check - can we properly release resources?
+    fs.remove("/a/b/file.txt", FileType::Regular).unwrap();
+    fs.remove("/a/b", FileType::Directory).unwrap();
+    fs.remove("/a", FileType::Directory).unwrap();
+    //fs.remove("/c/link_abs", FileType::Symlink).unwrap();
+    fs.remove("/c/dir_link", FileType::Symlink).unwrap();
+    fs.remove("/c/relative_dir_link", FileType::Symlink).unwrap();
+    fs.remove("/c", FileType::Directory).unwrap();
+    fs.remove("/d/file.txt", FileType::Regular).unwrap();
+    fs.remove("/d", FileType::Directory).unwrap();
+    fs.remove("/dangling_link", FileType::Symlink).unwrap();
+    fs.remove("/e/l1", FileType::Symlink).unwrap();
+    fs.remove("/e/l2", FileType::Symlink).unwrap();
+    fs.remove("/e", FileType::Directory).unwrap();
+    fs.remove("/link", FileType::Symlink).unwrap();
+    fs.remove("/link_with_dots", FileType::Symlink).unwrap();
+    // Read the root directory to ensure everything is cleaned up.
+    let entries = fs.read_dir("/").unwrap();
+    for entry in entries {
+        log!("Inode {} Name {}", entry.inode_id, String::from_utf8_lossy(&entry.name));
+    }
+    log!("File System after cleaning up: {}", fs.dump());
+    assert_eq!(fs.superblock().free_inodes, fs.superblock().num_inodes - 2, "All inodes should be released except root and placeholder");
+    assert_eq!(fs.superblock().free_blocks, 24 - 1, "All blocks should be released except root block");
 }

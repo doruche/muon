@@ -1,5 +1,5 @@
 use alloc::{string::ToString, sync::Arc, vec::Vec};
-use crate::{alloc_inode, bmap, dir_is_empty, directory::{dir_add_entry, dir_rm_entry}, file::{fread, fwrite}, free_inode, get_inode, mkdir, path::{self, resolve, split}, read_dir, read_superblock, structs::*, superblock, write_inode, write_superblock, BlockDevice, Error, Result, DOTDOT_NAME, DOT_NAME, ROOT_INODE_ID};
+use crate::{alloc_inode, bmap, dir_is_empty, directory::{dir_add_entry, dir_rm_entry}, file::{fread, fwrite}, free_inode, get_inode, mkdir, path::{self, resolve, split}, read_dir, read_superblock, resolve_without_last, structs::*, superblock, write_inode, write_superblock, BlockDevice, Error, Result, DOTDOT_NAME, DOT_NAME, ROOT_INODE_ID};
 use crate::structs::*;
 use crate::config::*;
 
@@ -154,13 +154,17 @@ impl<D: BlockDevice> FileSystem<D> {
 
     pub fn remove(&mut self, path: &str, ftype: FileType) -> Result<()> {
         let (parent_path, file_name) = split(path)?;
-        let (_, parent_inode_id) = resolve(&*self.device, &mut self.superblock, &parent_path)?;
+        let (_, parent_inode_id) =  resolve(&*self.device, &mut self.superblock, &parent_path)?;
         let mut parent_inode = get_inode(&*self.device, &mut self.superblock, parent_inode_id)?;
         if parent_inode.ftype != FileType::Directory {
             return Err(Error::NotDirectory);
         }
         println!("[remove] parent inode: {:?}", parent_inode);
-        let (_, inode_id) = resolve(&*self.device, &mut self.superblock, path)?;
+        let (_, inode_id) = if ftype != FileType::Symlink {
+            resolve(&*self.device, &mut self.superblock, path)?
+        } else {
+            resolve_without_last(&*self.device, &mut self.superblock, path)?
+        };
         println!("[remove] inode_id: {}", inode_id);
         let mut file_inode = get_inode(&*self.device, &mut self.superblock, inode_id)?;
         
@@ -300,6 +304,7 @@ impl<D: BlockDevice> FileSystem<D> {
     }
 
     /// Creates a symbolic link to the target file with the given link name.
+    /// Generates only absolute paths.
     /// Returns the inode ID of the symlink.
     pub fn symlink(
         &mut self,
@@ -343,7 +348,7 @@ impl<D: BlockDevice> FileSystem<D> {
         link_name: &str,
         buf: &mut [u8; MAX_PATH_LEN],
     ) -> Result<()> {
-        let (_, inode_id) = resolve(self.device.as_ref(), &mut self.superblock, link_name)?;
+        let (_, inode_id) = resolve_without_last(self.device.as_ref(), &mut self.superblock, link_name)?;
         let inode = get_inode(self.device.as_ref(), &self.superblock, inode_id)?;
         let path_buf = inode.get_path()?;
         buf.copy_from_slice(path_buf);

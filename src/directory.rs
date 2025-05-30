@@ -6,7 +6,7 @@ use crate::error::{FsError, Result};
 use crate::config::*;
 use crate::structs::*;
 
-fn trim_zero(name: &[u8]) -> &[u8] {
+pub fn trim_zero(name: &[u8]) -> &[u8] {
     let mut end = name.len();
     while end > 0 && name[end - 1] == 0 {
         end -= 1;

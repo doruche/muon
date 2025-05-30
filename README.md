@@ -1,5 +1,6 @@
 # Muon
-__(Under development)__
+__(Under development)__<br/>
+___NOTICE__ Muon is currently a quite vulnerable and error-prone file system. For example, it may not recover from errors and data may be lost. This is just a proof-of-concept project, and should not be used in production systems._
 
 Muon is a mini file system implemented in Rust, inspired by _vsfs_ (_very simple file system_, see _OSTEP_) , and primarily written for CafOS (author's operating system project). It is architected in a quite direct way easy to understand and extend.
 <br/>For simplicity, Muon is supposed to be used with a single file system per disk, and does not support advanced file system features (e.g. journaling, snapshots).
@@ -30,4 +31,5 @@ Muon uses simple linear storage layout, with the following structure:
 - __Inode Table__   Table of inodes, each inode is a fixed-size structure.
 - __Data Blocks__    Actual data blocks, where file contents are stored.
 ## Usage
-Muon is a `#[no_std]` library, and can be deployed in any Rust project. To use Muon, you need to implement the `BlockDevice` trait for your specific hardware, and optionally implement a caching strategy by implementing the `Cache` trait. Then create a `FileSystem` instance and use its methods to perform file operations.
+Muon is a `#[no_std]` library, and can be deployed in any Rust project. To use Muon, you need to implement the `BlockDevice` trait for your specific hardware, and optionally implement a caching strategy by implementing the `Cache` trait. Then create a `FileSystem` instance and use its methods to perform file operations.<br/>
+Some usage examples can be found in the `tests` directory.

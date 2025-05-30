@@ -1,4 +1,5 @@
 use crate::config::*;
+use crate::trim_zero;
 use crate::BlockDevice;
 use crate::Error;
 use crate::Result;
@@ -62,17 +63,8 @@ pub union InodePtr {
 
 impl core::fmt::Debug for InodePtr {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        unsafe {
-            match self {
-                Self { block_ptr: BlockPtr {..} } => {
-                    write!(f, "{:?}", self.block_ptr)
-                },
-                Self { path } => {
-                    let path_str = core::str::from_utf8(path).unwrap_or("<invalid>");
-                    write!(f, "Path: {}", path_str)
-                },
-            }
-        }
+        write!(f, "InodePtr {{ block_ptr: {:?} }}", unsafe { self.block_ptr });
+        write!(f, "InodePtr {{ path: {:?} }}", unsafe { String::from_utf8_lossy(trim_zero(&self.path)) })
     }
 }
 
