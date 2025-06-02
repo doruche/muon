@@ -114,6 +114,10 @@ fn test_lookup() {
     let (dir_inode_id, dir_ftype) = fs.lookup("/test_dir").unwrap();
     let dir_inode = fs.get_inode(dir_inode_id).unwrap();
     log!("Directory inode ID: {}, Type: {:?}", dir_inode_id, dir_ftype);
+
+    let (inode_id, ftype) = fs.lookup("//.").unwrap();
+    let inode = fs.get_inode(inode_id).unwrap();
+    log!("inode {:?}", inode);
 }
 
 #[test]

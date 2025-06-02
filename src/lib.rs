@@ -16,7 +16,7 @@
 //! 5. File: Represents file operations and data access.           | Fs implemented
 
 #![allow(unused)]
-//#![no_std]
+#![no_std]
 
 // Users of this crate must enable the `alloc` feature for heap allocations.
 extern crate alloc;

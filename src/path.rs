@@ -1,8 +1,6 @@
 //! Path resolution and manipulation utilities.
 
-use std::{collections::VecDeque, f32::consts::E, fs::File};
-
-use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
+use alloc::{boxed::Box, collections::vec_deque::VecDeque, string::{String, ToString}, vec::Vec};
 
 use crate::{directory::dir_lookup, get_inode, trim_zero, BlockDevice, Error, FileType, Result, SuperBlock, DOTDOT_NAME, DOT_NAME, ROOT_INODE_ID, SYMLOOP_MAX};
 
@@ -27,7 +25,7 @@ pub fn resolve(
     if canonicalized_path == "/" {
         return Ok((ROOT_INODE_ID as u32, ROOT_INODE_ID as u32));
     }
-    println!("Canonicalized path for {}: {}", path, canonicalized_path);
+    // println!("Canonicalized path for {}: {}", path, canonicalized_path);
 
     let mut current_inode_id = ROOT_INODE_ID;
     let mut parent_inode_id = ROOT_INODE_ID;
@@ -79,7 +77,7 @@ pub fn resolve_without_last(
     if canonicalized_path == "/" {
         return Ok((ROOT_INODE_ID as u32, ROOT_INODE_ID as u32));
     }
-    println!("Canonicalized path for {}: {}", path, canonicalized_path);
+    // println!("Canonicalized path for {}: {}", path, canonicalized_path);
 
     let mut current_inode_id = ROOT_INODE_ID;
     let mut parent_inode_id = ROOT_INODE_ID;
@@ -142,7 +140,7 @@ pub fn canonicalize(
         if link_depth >= SYMLOOP_MAX {
             return Err(Error::PathTooLong);
         }
-        println!("Current components to process: {:?}", components_to_process);
+        // println!("Current components to process: {:?}", components_to_process);
         if components_to_process.is_empty() {
             break;
         }
@@ -152,10 +150,10 @@ pub fn canonicalize(
         }
         if cur_component == ".." {
             if current_inode_id == ROOT_INODE_ID {
-                println!(".. encountered at root, ignoring");
+            //     println!(".. encountered at root, ignoring");
                 continue;
             }
-            println!(".. encountered, current components: {:?}", canonical_components);
+            // println!(".. encountered, current components: {:?}", canonical_components);
             current_inode_id = parent_inode_id;
             current_inode = get_inode(device, superblock, current_inode_id)?;
             canonical_components.pop_back();
@@ -167,7 +165,7 @@ pub fn canonicalize(
             &mut current_inode,
             cur_component.as_bytes(),
         )?;
-        println!("Next inode ID for component '{}': {}", cur_component, next_inode_id);
+        // println!("Next inode ID for component '{}': {}", cur_component, next_inode_id);
         let next_inode = get_inode(device, superblock, next_inode_id)?;
         if next_inode.ftype == FileType::Symlink {
             if components_to_process.is_empty() && not_cano_last_symlink {
@@ -193,7 +191,7 @@ pub fn canonicalize(
                     .collect();
             new_components.append(&mut components_to_process);
             components_to_process = new_components;
-            println!("Symlink target: {}, new components to process: {:?}", sym_target_str, components_to_process);
+            // println!("Symlink target: {}, new components to process: {:?}", sym_target_str, components_to_process);
             continue;
         }
         if next_inode.ftype != FileType::Directory &&
@@ -214,7 +212,7 @@ pub fn canonicalize(
     if canonical_components.is_empty() {
         return Ok("/".to_string());
     } else {
-        Ok(format!(
+        Ok(alloc::format!(
             "/{}",
             canonical_components
                 .into_iter()
@@ -246,7 +244,7 @@ pub fn split(path: &str) -> Result<(String, String)> {
     if dir_path.is_empty() {
         Ok(("/".to_string(), file_name.to_string()))
     } else {
-        Ok((format!("/{}", dir_path), file_name.to_string()))
+        Ok((alloc::format!("/{}", dir_path), file_name.to_string()))
     }
 }
 #[cfg(test)]

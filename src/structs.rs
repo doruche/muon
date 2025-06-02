@@ -1,3 +1,5 @@
+use alloc::string::String;
+
 use crate::config::*;
 use crate::trim_zero;
 use crate::BlockDevice;

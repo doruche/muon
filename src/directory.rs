@@ -1,5 +1,5 @@
 use alloc::boxed::Box;
-use alloc::vec;
+use alloc::vec::Vec;
 
 use crate::{alloc_inode, bmap, write_inode, write_superblock, BlockDevice};
 use crate::error::{FsError, Result};
@@ -95,11 +95,11 @@ pub fn dir_lookup(
                 continue;
             }
             num_looked_up += 1;
-            println!("[dir_lookup] Checking entry: {}, inode_id: {}, query {}",
-                String::from_utf8_lossy(&entry.name), entry.inode_id, String::from_utf8_lossy(name));
+            // println!("[dir_lookup] Checking entry: {}, inode_id: {}, query {}",
+            //    String::from_utf8_lossy(&entry.name), entry.inode_id, String::from_utf8_lossy(name));
             if name_cmp(&entry.name, name) {
-                println!("[dir_lookup] Found entry: {}, inode_id: {}", 
-                    String::from_utf8_lossy(&entry.name), entry.inode_id);
+                // println!("[dir_lookup] Found entry: {}, inode_id: {}", 
+                //    String::from_utf8_lossy(&entry.name), entry.inode_id);
                 return Ok(entry.inode_id);
             }
         }   
@@ -134,8 +134,8 @@ pub fn dir_add_entry(
 
     let num_dirents = (prev_size / DIR_ENTRY_SIZE as u64) as usize;
     let num_blocks = parent_inode.blocks as u64;
-    println!("Adding entry: {}, prev size: {}, num dirents: {}, num blocks: {}", 
-        String::from_utf8_lossy(&child_entry.name), prev_size, num_dirents, num_blocks);
+    // println!("Adding entry: {}, prev size: {}, num dirents: {}, num blocks: {}", 
+    //    String::from_utf8_lossy(&child_entry.name), prev_size, num_dirents, num_blocks);
 
     'found_slot: for i in 0..num_blocks as usize {
         let block_id = bmap(
@@ -148,13 +148,13 @@ pub fn dir_add_entry(
         device.read_block(block_id, cur_block_buf.as_mut())?;
 
         for j in 0..NUM_ENTRY_PER_BLOCK {
-            println!("Checking block {}, entry {}", i, j);
+            //println!("Checking block {}, entry {}", i, j);
             let cur_dirent_offset = j * DIR_ENTRY_SIZE;
             let dirent_ptr = unsafe {
                 cur_block_buf.as_mut_ptr().add(cur_dirent_offset) as *mut DirEntry
             };
             let dirent = unsafe { &*dirent_ptr };
-                println!("entry {} name {}", i, String::from_utf8_lossy(&dirent.name));
+                //println!("entry {} name {}", i, String::from_utf8_lossy(&dirent.name));
             if dirent.inode_id == 0 && name_is_empty(&dirent.name) {
                 // Found an empty slot
                 block_id_to_write = block_id;
@@ -177,7 +177,7 @@ pub fn dir_add_entry(
             prev_size,
             true,
         )?;
-        println!("blocks: {}, new block id: {}", parent_inode.blocks, block_id_to_write);
+        //println!("blocks: {}, new block id: {}", parent_inode.blocks, block_id_to_write);
         block_inner_offset = (prev_size % BLOCK_SIZE as u64) as usize;
         device.read_block(block_id_to_write, cur_block_buf.as_mut())?;
 
@@ -193,8 +193,8 @@ pub fn dir_add_entry(
     }
     device.write_block(block_id_to_write, cur_block_buf.as_ref())?;
 
-    println!("After adding entry: {}, new size: {}, new blocks: {}", 
-        String::from_utf8_lossy(&child_entry.name), parent_inode.size, parent_inode.blocks);
+    // println!("After adding entry: {}, new size: {}, new blocks: {}", 
+    //    String::from_utf8_lossy(&child_entry.name), parent_inode.size, parent_inode.blocks);
 
     Ok(())
 }
@@ -228,7 +228,7 @@ pub fn dir_rm_entry(
     let mut block_id_to_modify = None;
     let mut block_inner_offset = 0;
     'found_entry: for i in 0..num_blocks as usize {
-        println!("[dir_rm_entry] Checking block {} for entry {}", i, String::from_utf8_lossy(name));
+        // println!("[dir_rm_entry] Checking block {} for entry {}", i, String::from_utf8_lossy(name));
         let block_id = bmap(
             device, 
             superblock, 
@@ -261,7 +261,7 @@ pub fn dir_rm_entry(
     }
 
     if block_id_to_modify.is_none() {
-        println!("Entry not found: {}", String::from_utf8_lossy(name));
+        // println!("Entry not found: {}", String::from_utf8_lossy(name));
         return Err(FsError::NotFound);
     }
 
@@ -294,8 +294,8 @@ pub fn dir_is_empty(
     
     // Check if the directory has any entries other than '.' and '..'
     let num_dirents = (dir_inode.size / DIR_ENTRY_SIZE as u64) as usize;
-    println!("Checking if directory {} is empty, num dirents: {}", 
-        dir_inode.id, num_dirents);
+    // println!("Checking if directory {} is empty, num dirents: {}", 
+    //     dir_inode.id, num_dirents);
     if num_dirents == 2 {
         return Ok(true); // Only '.' and '..' entries
     } else if num_dirents < 2 {
@@ -378,10 +378,10 @@ pub fn read_dir(
     let num_dirents = (dir_inode.size / DIR_ENTRY_SIZE as u64) as usize;
     let num_blocks = (dir_inode.size + BLOCK_SIZE as u64 - 1) / BLOCK_SIZE as u64;
 
-    println!("Reading directory: {}, num dirents: {}, num blocks: {}", 
-        dir_inode.id, num_dirents, num_blocks);
+    // println!("Reading directory: {}, num dirents: {}, num blocks: {}", 
+    //    dir_inode.id, num_dirents, num_blocks);
 
-    let mut entries = vec![];
+    let mut entries = Vec::new();
     let mut cur_block_buf = Box::new([0u8; BLOCK_SIZE]);
 
     for i in 0..num_blocks as usize {

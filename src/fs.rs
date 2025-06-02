@@ -1,5 +1,5 @@
-use alloc::{string::ToString, sync::Arc, vec::Vec};
-use crate::{alloc_inode, bmap, dir_is_empty, directory::{dir_add_entry, dir_rm_entry}, file::{fread, fwrite}, free_inode, get_inode, mkdir, path::{self, resolve, split}, read_dir, read_superblock, resolve_without_last, structs::*, superblock, write_inode, write_superblock, BlockDevice, Error, Result, DOTDOT_NAME, DOT_NAME, ROOT_INODE_ID};
+use alloc::{boxed::Box, string::{String, ToString}, sync::Arc, vec::Vec};
+use crate::{alloc_inode, bmap, canonicalize, dir_is_empty, directory::{dir_add_entry, dir_rm_entry}, file::{fread, fwrite}, free_inode, get_inode, mkdir, path::{self, resolve, split}, read_dir, read_superblock, resolve_without_last, structs::*, superblock, write_inode, write_superblock, BlockDevice, Error, Result, DOTDOT_NAME, DOT_NAME, ROOT_INODE_ID};
 use crate::structs::*;
 use crate::config::*;
 
@@ -30,6 +30,8 @@ impl<D: BlockDevice> FileSystem<D> {
         for i in 0..superblock.inode_table_blocks {
             device.write_block(superblock.inode_table_start + i, &zero_block)?;
         }
+
+        
         // No need to zero out data blocks, as they will be zeroed on allcations.
 
         // Initialize root inode
@@ -82,7 +84,7 @@ impl<D: BlockDevice> FileSystem<D> {
         })
     }
 
-    pub fn flush(&mut self) -> Result<()> {
+    pub fn flush(&self) -> Result<()> {
         self.device.flush()?;
         Ok(())
     }
@@ -93,7 +95,7 @@ impl<D: BlockDevice> FileSystem<D> {
 
     /// Unmounts the filesystem, writing the superblock back to the device.
     /// This should be called before the device is closed to ensure all metadata is saved.
-    pub fn unmount(&mut self) -> Result<()> {
+    pub fn unmount(&self) -> Result<()> {
         write_superblock(self.device.as_ref(), &self.superblock)?;
         self.device.flush()?;
         Ok(())
@@ -105,6 +107,15 @@ impl<D: BlockDevice> FileSystem<D> {
         let (_, inode_id) = resolve(&*self.device, &mut self.superblock, path)?;
         let inode = get_inode(&*self.device, &self.superblock, inode_id)?;
         Ok((inode_id, inode.ftype))
+    }
+
+    pub fn canonicalize(&mut self, path: &str) -> Result<String> {
+        canonicalize(
+            self.device.as_ref(), 
+            &mut self.superblock, 
+            path, 
+            false,
+        )
     }
 
     pub fn creat(
@@ -119,7 +130,7 @@ impl<D: BlockDevice> FileSystem<D> {
         if parent_inode.ftype != FileType::Directory {
             return Err(Error::NotDirectory);
         }
-        println!("parent inode: {:?}", parent_inode);
+        // println!("parent inode: {:?}", parent_inode);
         match file_type {
             FileType::Regular => {
                 let mut new_inode = alloc_inode(
@@ -159,13 +170,13 @@ impl<D: BlockDevice> FileSystem<D> {
         if parent_inode.ftype != FileType::Directory {
             return Err(Error::NotDirectory);
         }
-        println!("[remove] parent inode: {:?}", parent_inode);
+        // println!("[remove] parent inode: {:?}", parent_inode);
         let (_, inode_id) = if ftype != FileType::Symlink {
             resolve(&*self.device, &mut self.superblock, path)?
         } else {
             resolve_without_last(&*self.device, &mut self.superblock, path)?
         };
-        println!("[remove] inode_id: {}", inode_id);
+        // println!("[remove] inode_id: {}", inode_id);
         let mut file_inode = get_inode(&*self.device, &mut self.superblock, inode_id)?;
         
         if matches!(ftype, FileType::Special) {
@@ -197,7 +208,7 @@ impl<D: BlockDevice> FileSystem<D> {
         }
 
         if file_inode.links_cnt == 0 {
-            println!("[remove] Freeing inode: {}", file_inode.id);
+        //     println!("[remove] Freeing inode: {}", file_inode.id);
             free_inode(self.device.as_ref(), &mut self.superblock, file_inode.id)?;
         } else {
             write_inode(self.device.as_ref(), &mut self.superblock, &file_inode)?;
@@ -228,6 +239,15 @@ impl<D: BlockDevice> FileSystem<D> {
         buf: &mut [u8],
     ) -> Result<usize> {
         let (_, inode_id) = resolve(&*self.device, &mut self.superblock, path)?;
+        self.fread_by_inode(inode_id, offset, buf)
+    }
+
+    pub fn fread_by_inode(
+        &mut self,
+        inode_id: u32,
+        offset: usize,
+        buf: &mut [u8],
+    ) -> Result<usize> {
         let mut inode = get_inode(&*self.device, &self.superblock, inode_id)?; 
         if inode.ftype != FileType::Regular {
             return Err(Error::NotRegular);
@@ -253,6 +273,15 @@ impl<D: BlockDevice> FileSystem<D> {
         buf: &[u8],
     ) -> Result<usize> {
         let (_, inode_id) = resolve(&*self.device, &mut self.superblock, path)?;
+        self.fwrite_by_inode(inode_id, offset, buf)
+    }
+
+    pub fn fwrite_by_inode(
+        &mut self,
+        inode_id: u32,
+        offset: usize,
+        buf: &[u8],
+    ) -> Result<usize> {
         let mut inode = get_inode(&*self.device, &self.superblock, inode_id)?;
         if inode.ftype != FileType::Regular {
             return Err(Error::NotRegular);
@@ -368,6 +397,6 @@ impl<D: BlockDevice> FileSystem<D> {
     }
 
     pub fn dump(&self) -> String {
-        format!("{:?}", self.superblock)
+        alloc::format!("{:?}", self.superblock)
     }
 }
