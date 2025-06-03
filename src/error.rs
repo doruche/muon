@@ -16,6 +16,7 @@ pub enum FsError {
     FileTooLarge,
     PathTooLong,
     InvalidFileName,
+    EOF(Option<usize>),
     ReadError,
     WriteError,
     NotFound,

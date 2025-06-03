@@ -2,7 +2,7 @@
 
 use alloc::boxed::Box;
 
-use crate::{bmap, write_inode, BlockDevice, Error, FileType, Inode, Result, SuperBlock, BLOCK_SIZE};
+use crate::{bitmap::free_data_block, bmap, write_inode, BlockDevice, Error, FileType, Inode, Result, SuperBlock, BLOCK_SIZE, PTRS_PER_BLOCK};
 
 /// Reads data from a file into the provided buffer.
 /// The `offset` is the position in the file to start reading from.
@@ -18,10 +18,6 @@ pub fn fread(
         return Err(Error::NotReadable);
     }
 
-    if buffer.len() + offset > inode.size as usize {
-        return Err(Error::OutOfBounds);
-    }
-
     let mut bytes_read = 0;
     let mut current_offset = offset;
     let mut current_relative_block_id = current_offset / BLOCK_SIZE;
@@ -29,17 +25,24 @@ pub fn fread(
     let mut block_buf = Box::new([0u8; BLOCK_SIZE]);
 
     while remain_buf_len > 0 {
-        let bytes_to_read = BLOCK_SIZE.min(remain_buf_len);
-        if bytes_to_read == 0 {
+        let bytes_to_read = BLOCK_SIZE.min(remain_buf_len).min(inode.size as usize - bytes_read - offset);
+        if bytes_to_read == 0  {
             break;
         }
-        let current_block_id = bmap(
+        let current_block_id = match bmap(
             device,
             superblock,
             inode,
             current_relative_block_id as u64 * BLOCK_SIZE as u64,
-            false,
-        )?;
+            true,
+        ) {
+            Ok(block_id) => block_id,
+            Err(Error::OutOfBounds) => {
+                // If we reach beyond the file size, we stop reading.
+                break;
+            }
+            Err(e) => return Err(e),
+        };
         
         device.read_block(current_block_id, block_buf.as_mut())?;
         let start_offset = current_offset % BLOCK_SIZE;
@@ -108,4 +111,48 @@ pub fn fwrite(
     }
 
     Ok(bytes_written)
+}
+
+pub fn ftruncate(
+    device: &impl BlockDevice,
+    superblock: &mut SuperBlock,
+    inode: &mut Inode,
+) -> Result<()> {
+    if inode.ftype != FileType::Regular {
+        return Err(Error::NotWritable);
+    }
+
+    let blk_ptr = inode.get_block_ptrs_mut()?;
+    for direct_blk in blk_ptr.direct.iter_mut() {
+        if let Some(block_id) = *direct_blk {
+            free_data_block(device, superblock, block_id)?;
+            *direct_blk = None;
+        }
+    }
+    if let Some(indirect_block) = blk_ptr.indirect {
+        let mut indirect_ptr_buf = Box::new([0u8; BLOCK_SIZE]);
+        device.read_block(indirect_block, indirect_ptr_buf.as_mut())?;
+        
+        let ptrs = unsafe {
+            core::slice::from_raw_parts_mut(
+                indirect_ptr_buf.as_mut_ptr() as *mut u32,
+                PTRS_PER_BLOCK
+            )
+        };
+        
+        for &block_id in ptrs.iter() {
+            if block_id != 0 {
+                free_data_block(device, superblock, block_id)?;
+            }
+        }
+
+        free_data_block(device, superblock, indirect_block)?;
+        blk_ptr.indirect = None;
+    }
+
+    inode.blocks = 0;
+    inode.size = 0;
+    write_inode(device, superblock, inode)?;
+    
+    Ok(())
 }

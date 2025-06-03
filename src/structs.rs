@@ -1,4 +1,5 @@
 use alloc::string::String;
+use alloc::vec::Vec;
 
 use crate::config::*;
 use crate::trim_zero;
@@ -29,7 +30,7 @@ pub struct SuperBlock {
 }
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum FileType {
     Regular = 1,
     Directory = 2,
@@ -37,8 +38,20 @@ pub enum FileType {
     Special = 4, // For devices or other special files
 }
 
+impl core::fmt::Debug for FileType {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let type_str = match self {
+            FileType::Regular => "regular",
+            FileType::Directory => "directory",
+            FileType::Symlink => "symlink",
+            FileType::Special => "special",
+        };
+        write!(f, "{:<11}", type_str)
+    }
+}
+
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Read = 0b001,
     Write = 0b010,
@@ -47,6 +60,32 @@ pub enum Mode {
     RE = Self::Read as u8 | Self::Execute as u8,
     RWE = Self::Read as u8 | Self::Write as u8 | Self::Execute as u8,
     None = 0b000, // No permissions
+}
+
+impl Mode {
+    pub fn contains(&self, mode: Mode) -> bool {
+        (*self as u8 & mode as u8) != 0
+    }
+
+    pub fn is_empty(&self) -> bool {
+        *self == Mode::None
+    }
+}
+
+impl core::fmt::Debug for Mode {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut modes = Vec::new();
+        if self.contains(Mode::Read) {
+            modes.push("R");
+        }
+        if self.contains(Mode::Write) {
+            modes.push("W");
+        }
+        if self.contains(Mode::Execute) {
+            modes.push("E");
+        }
+        write!(f, "{:<4}", modes.join(""))
+    }
 }
 
 #[repr(C)]

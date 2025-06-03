@@ -1,5 +1,5 @@
 use alloc::{boxed::Box, string::{String, ToString}, sync::Arc, vec::Vec};
-use crate::{alloc_inode, bmap, canonicalize, dir_is_empty, directory::{dir_add_entry, dir_rm_entry}, file::{fread, fwrite}, free_inode, get_inode, mkdir, path::{self, resolve, split}, read_dir, read_superblock, resolve_without_last, structs::*, superblock, write_inode, write_superblock, BlockDevice, Error, Result, DOTDOT_NAME, DOT_NAME, ROOT_INODE_ID};
+use crate::{alloc_inode, bmap, canonicalize, dir_is_empty, directory::{dir_add_entry, dir_rm_entry}, file::{fread, fwrite}, free_inode, ftruncate, get_inode, mkdir, path::{self, resolve, split}, read_dir, read_superblock, resolve_without_last, structs::*, superblock, write_inode, write_superblock, BlockDevice, Error, Result, DOTDOT_NAME, DOT_NAME, ROOT_INODE_ID};
 use crate::structs::*;
 use crate::config::*;
 
@@ -217,6 +217,35 @@ impl<D: BlockDevice> FileSystem<D> {
         Ok(())
     }
 
+    pub fn ftruncate(
+        &mut self,
+        path: &str
+    ) -> Result<()> {
+        let (_, inode_id) = resolve(&*self.device, &mut self.superblock, path)?;
+        self.ftruncate_by_inode_id(inode_id)
+    }
+
+    pub fn ftruncate_by_inode_id(
+        &mut self,
+        inode_id: u32,
+    ) -> Result<()> {
+        let mut inode = get_inode(&*self.device, &self.superblock, inode_id)?;
+        if inode.ftype != FileType::Regular {
+            return Err(Error::NotRegular);
+        }
+        if !matches!(inode.mode, Mode::Write|Mode::RW|Mode::RWE) {
+            return Err(Error::PermissionDenied);
+        }
+        
+        ftruncate(
+            self.device.as_ref(),
+            &mut self.superblock,
+            &mut inode,
+        )?;
+
+        Ok(())
+    }
+
     pub fn read_dir(&mut self, path: &str) -> Result<Vec<DirEntry>> {
         let (_, inode_id) = resolve(&*self.device, &mut self.superblock, path)?;
         let mut inode = get_inode(&*self.device, &self.superblock, inode_id)?;
@@ -263,6 +292,11 @@ impl<D: BlockDevice> FileSystem<D> {
             offset,
             buf,
         )?;
+
+        if bytes_read == 0 {
+            return Err(Error::EOF(Some(bytes_read)));
+        }
+
         Ok(bytes_read)   
     }
 
@@ -378,11 +412,22 @@ impl<D: BlockDevice> FileSystem<D> {
         buf: &mut [u8; MAX_PATH_LEN],
     ) -> Result<()> {
         let (_, inode_id) = resolve_without_last(self.device.as_ref(), &mut self.superblock, link_name)?;
+        self.read_link_by_inode_id(inode_id, buf)
+    } 
+
+    pub fn read_link_by_inode_id(
+        &mut self,
+        inode_id: u32,
+        buf: &mut [u8; MAX_PATH_LEN],
+    ) -> Result<()> {
         let inode = get_inode(self.device.as_ref(), &self.superblock, inode_id)?;
+        if inode.ftype != FileType::Symlink {
+            return Err(Error::NotSymlink);
+        }
         let path_buf = inode.get_path()?;
         buf.copy_from_slice(path_buf);
         Ok(())
-    } 
+    }
 
     pub fn root_inode_id(&self) -> u32 {
         ROOT_INODE_ID as u32
